@@ -295,4 +295,115 @@ codeunit 51100 "RV Resent Management"
         XmlDoc.WriteTo(ModifiedXml);
     end;
 
+    /// <summary>
+    /// Genera el XML de la nota de crédito (E34) que se enviaría para la transacción, sin enviarlo,
+    /// sin consumir NCF y sin modificar el registro. El NCF mostrado es el próximo disponible de la serie.
+    /// </summary>
+    procedure BuildCreditMemoXMLPreview(RVTransaction: Record "RV Transaction Header"; var CreditMemoXML: Text; var PreviewNCF: Code[20]): Boolean
+    var
+        TransactionHeader: Record "LSC Transaction Header";
+        LSPosTerminal: Record "LSC POS Terminal";
+        EFEncabezado: Record "EF Encabezado";
+        EFVoxelRequest: Codeunit "EF VoxelRequest";
+        VoxelTaxXML: Codeunit "RV Voxel Tax XML";
+        NoSeries: Codeunit "No. Series";
+    begin
+        CreditMemoXML := '';
+        TransactionHeader.SetRange("Store No.", RVTransaction."Store No.");
+        TransactionHeader.SetRange("POS Terminal No.", RVTransaction."POS Terminal No.");
+        TransactionHeader.SetRange("Transaction No.", RVTransaction."Transaction No.");
+        if not TransactionHeader.FindFirst() then
+            exit(false);
+        if not LSPosTerminal.Get(TransactionHeader."POS Terminal No.") then
+            exit(false);
+        if LSPosTerminal."LSDXNCF Nota de Credito" = '' then
+            Error('NCF for Credit Memo is not configured on POS Terminal %1', LSPosTerminal."No.");
+
+        PreviewNCF := CopyStr(NoSeries.PeekNextNo(LSPosTerminal."LSDXNCF Nota de Credito", WorkDate()), 1, MaxStrLen(PreviewNCF));
+        if not RVTransaction.GenerateEFHeader(PreviewNCF, TransactionHeader, EFEncabezado) then
+            exit(false);
+
+        CreditMemoXML := EFVoxelRequest.CreateVoxelRequest(EFEncabezado);
+        CreditMemoXML := VoxelTaxXML.ForCancellation(CreditMemoXML);
+        exit(CreditMemoXML <> '');
+    end;
+
+    procedure DownloadCreditMemoPreview(RVTransaction: Record "RV Transaction Header")
+    var
+        TempBlob: Codeunit "Temp Blob";
+        XMLStream: InStream;
+        XMLOutStream: OutStream;
+        CreditMemoXML: Text;
+        PreviewNCF: Code[20];
+        FileName: Text;
+    begin
+        if not BuildCreditMemoXMLPreview(RVTransaction, CreditMemoXML, PreviewNCF) then
+            Error('No se pudo generar el XML de la nota de crédito para la transacción %1.', RVTransaction."Transaction No.");
+        TempBlob.CreateOutStream(XMLOutStream, TextEncoding::UTF8);
+        XMLOutStream.WriteText(CreditMemoXML);
+        TempBlob.CreateInStream(XMLStream, TextEncoding::UTF8);
+        FileName := 'NC_' + RVTransaction."LSDX NCF" + '.xml';
+        DownloadFromStream(XMLStream, '', '', '', FileName);
+    end;
+
+    /// <summary>
+    /// Genera en un ZIP los XML de nota de crédito de las transacciones del filtro. Solo vista previa: no envía ni consume NCF.
+    /// </summary>
+    procedure DownloadCreditMemoPreviewZip(var RVTransaction: Record "RV Transaction Header")
+    var
+        DataCompression: Codeunit "Data Compression";
+        TempBlobXML: Codeunit "Temp Blob";
+        TempBlobZip: Codeunit "Temp Blob";
+        XMLStream: InStream;
+        XMLOutStream: OutStream;
+        ZipStream: InStream;
+        ZipOutStream: OutStream;
+        Progress: Dialog;
+        CreditMemoXML: Text;
+        PreviewNCF: Code[20];
+        Total: Integer;
+        Processed: Integer;
+        Generated: Integer;
+        Failed: Integer;
+        FileName: Text;
+    begin
+        Total := RVTransaction.Count();
+        if Total = 0 then
+            exit;
+        if Total > 2000 then
+            if not Confirm('Se generarán %1 XML en un solo ZIP (vista previa). Puede tardar y ocupar mucha memoria. ¿Continuar?', false, Total) then
+                exit;
+
+        DataCompression.CreateZipArchive();
+        Progress.Open('Generando XML de notas de crédito...\Procesados #1######## de #2########');
+        Progress.Update(2, Total);
+        RVTransaction.FindSet();
+        repeat
+            Processed += 1;
+            Clear(TempBlobXML);
+            if BuildCreditMemoXMLPreview(RVTransaction, CreditMemoXML, PreviewNCF) then begin
+                TempBlobXML.CreateOutStream(XMLOutStream, TextEncoding::UTF8);
+                XMLOutStream.WriteText(CreditMemoXML);
+                TempBlobXML.CreateInStream(XMLStream, TextEncoding::UTF8);
+                DataCompression.AddEntry(XMLStream, 'NC_' + RVTransaction."LSDX NCF" + '.xml');
+                Generated += 1;
+            end else
+                Failed += 1;
+            if Processed mod 50 = 0 then
+                Progress.Update(1, Processed);
+        until RVTransaction.Next() = 0;
+        Progress.Close();
+
+        if Generated = 0 then
+            Error('No se generó ningún XML.');
+
+        TempBlobZip.CreateOutStream(ZipOutStream);
+        DataCompression.SaveZipArchive(ZipOutStream);
+        DataCompression.CloseZipArchive();
+        TempBlobZip.CreateInStream(ZipStream);
+        FileName := 'NotasCredito_Preview.zip';
+        DownloadFromStream(ZipStream, '', '', '', FileName);
+        Message('XML generados: %1. Con error: %2.', Generated, Failed);
+    end;
+
 }

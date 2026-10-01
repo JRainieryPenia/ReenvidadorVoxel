@@ -178,6 +178,33 @@ page 51100 "RV Transaction Register"
                     Management.DownloadCreditMemoXML(Rec."Voided NCF Credit Memo");
                 end;
             }
+            action(RVPreviewCreditMemoXML)
+            {
+                Caption = 'Preview Credit Memo XML';
+                ToolTip = 'Generates and downloads the credit memo (E34) XML that would be sent for the current transaction. It is not sent and no NCF is consumed.';
+                ApplicationArea = All;
+                Image = ViewDetails;
+
+                trigger OnAction()
+                begin
+                    RVResentManagement.DownloadCreditMemoPreview(Rec);
+                end;
+            }
+            action(RVPreviewCreditMemoXMLZip)
+            {
+                Caption = 'Preview Credit Memo XMLs (ZIP)';
+                ToolTip = 'Generates the credit memo XMLs of the selected transactions in a ZIP file. They are not sent and no NCF is consumed.';
+                ApplicationArea = All;
+                Image = Export;
+
+                trigger OnAction()
+                var
+                    SelectedRV: Record "RV Transaction Header";
+                begin
+                    CurrPage.SetSelectionFilter(SelectedRV);
+                    RVResentManagement.DownloadCreditMemoPreviewZip(SelectedRV);
+                end;
+            }
             //Downlaod XML
             action("Download XML")
             {
@@ -216,6 +243,35 @@ page 51100 "RV Transaction Register"
                 trigger OnAction()
                 begin
                     LoadTransactions();
+                end;
+            }
+            action("Import from Excel")
+            {
+                Caption = 'Import from Excel';
+                ToolTip = 'Imports Receipt No. or e-NCF values from an Excel file (same format as Bulk Credit Memo: header in row 1, document in column A) and loads them as transactions.';
+                Image = ImportExcel;
+                ApplicationArea = All;
+
+                trigger OnAction()
+                var
+                    RVExcelImport: Codeunit "RV Excel Import";
+                begin
+                    RVExcelImport.ImportFromExcel();
+                    CurrPage.Update(false);
+                end;
+            }
+            action("Download Import Template")
+            {
+                Caption = 'Download Import Template';
+                ToolTip = 'Downloads the Excel template for the import.';
+                Image = ExportToExcel;
+                ApplicationArea = All;
+
+                trigger OnAction()
+                var
+                    RVExcelImport: Codeunit "RV Excel Import";
+                begin
+                    RVExcelImport.DownloadImportTemplate();
                 end;
             }
             action("Clear Transactions")

@@ -94,6 +94,33 @@ codeunit 51148 "RV Voxel Tax XML Tests"
         AssertUnchangedAmounts(Result);
     end;
 
+    [Test]
+    procedure ProductionSampleCreditMemoKeepsHistoricalBase()
+    var
+        Management: Codeunit "RV Resent Management";
+        Result: Text;
+    begin
+        // Voxel offline production (E320000140425): ITBIS line 39.07 + tax 7.03 -> summary base 46.10.
+        Result := Management.ConvertToCreditMemo(ProductionSample(), 'REF-NC', 'E340000000001', 'E320000140425', '1');
+        Result := TaxXML.ForCancellation(Result);
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Base', '46.10');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Amount', '7.03');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="Exento"]/@Base', '90.91');
+        AssertAttribute(Result, '/Transaction/TotalSummary/@SubTotal', '129.98');
+        AssertAttribute(Result, '/Transaction/TotalSummary/@Total', '137.01');
+        // The resend of the invoice itself is the corrected one.
+        AssertAttribute(TaxXML.ForResend(ProductionSample()), '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Base', '39.07');
+    end;
+
+    local procedure ProductionSample(): Text
+    begin
+        exit('<Transaction><GeneralData Ref="00000P1001000332287" Type="FacturaConsumo" Date="2026-08-31" Currency="DOP" NCF="E320000140425" TaxIncluded="false" ExchangeRate="1.00"/>' +
+            '<ProductList><Product SupplierSKU="10000006"><Taxes><Tax Type="Exento" Rate="0" Base="90.91" Amount="0"/></Taxes></Product>' +
+            '<Product SupplierSKU="100630"><Taxes><Tax Type="ITBIS" Rate="18" Base="39.07" Amount="7.03"/></Taxes></Product></ProductList>' +
+            '<TaxSummary><Tax Type="ITBIS" Rate="18" Base="46.10" Amount="7.03"/><Tax Type="Exento" Rate="0" Base="90.91" Amount="0"/></TaxSummary>' +
+            '<TotalSummary SubTotal="129.98" Tax="7.03" Total="137.01"/></Transaction>');
+    end;
+
     local procedure MixedInvoice(SummaryBase: Text): Text
     begin
         exit('<Transaction><GeneralData Ref="00000P1001000342556" Type="FacturaConsumo" Date="2026-09-29" NCF="E320000153206" TaxIncluded="false"/>' +
