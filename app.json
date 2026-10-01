@@ -1,0 +1,75 @@
+{
+  "id": "5019d5e5-2500-4d09-b48f-1feb068e2543",
+  "name": "Reenvidador Voxel",
+  "publisher": "Dextra",
+  "version": "26.0.0.0",
+    "brief": "",
+    "description": "",
+    "privacyStatement": "",
+    "EULA": "",
+    "help": "",
+    "url": "",
+    "logo": "",
+    "dependencies": [
+      {
+        "id": "b269ef93-1340-452e-bc44-732c5dacd1c8",
+        "name": "Base App DR Localization",
+        "publisher": "Dextra",
+        "version": "26.4.1.13"
+      },
+      {
+        "id": "4ccf94f0-8e86-437f-99fc-a4eeda4a5122",
+        "name": "Facturacion Electronica",
+        "publisher": "Dextra",
+        "version": "26.5.2.293"
+      },
+      {
+        "id": "4e2e9532-7e97-4f5e-af6e-1b5f2e51b9e2",
+        "name": "facturacion-electronica-ls",
+        "publisher": "Dextra",
+        "version": "26.5.2.235"
+      },
+      {
+        "name": "LS Central",
+        "id": "5ecfc871-5d82-43f1-9c54-59685e82318d",
+        "publisher": "LS Retail",
+        "version": "26.1.0.976"
+      },
+      {
+        "name": "LS Central System App",
+        "id": "2a0547fa-f60f-401d-b1fe-c7c4be8fb230",
+        "publisher": "LS Retail",
+        "version": "26.1.0.976"
+      },
+      {
+        "id": "b18ab944-2133-4326-bcd7-a235e0a8bdef",
+        "name": "LS Central DR Localization",
+        "publisher": "Dextra",
+        "version": "26.2.0.196"
+      },
+      {
+        "id": "36b9c68f-cc27-46b1-bf63-4400a31c5f61",
+        "name": "DX-Payments",
+        "publisher": "Dextra",
+        "version": "26.2.0.107"
+      }
+    ],
+    "screenshots": [],
+    "platform": "1.0.0.0",
+    "application": "26.0.0.0",
+    "idRanges": [
+      {
+        "from": 51100,
+        "to": 51149
+      }
+    ],
+    "resourceExposurePolicy": {
+      "allowDebugging": true,
+      "allowDownloadingSource": true,
+      "includeSourceInSymbolFile": true
+    },
+    "runtime": "14.0",
+    "features": [
+      "NoImplicitWith"
+    ]
+  }
