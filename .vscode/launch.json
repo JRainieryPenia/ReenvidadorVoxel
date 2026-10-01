@@ -36,6 +36,36 @@
             "tenant": "default",
             "usePublicURLFromServer": true,
             "port": 3089
+        },
+        {
+            "name": "AL: Generated Snapshot request",
+            "request": "snapshotInitialize",
+            "type": "al",
+            "environmentType": "Sandbox",
+            "environmentName": "Prueba-Nov-2026",
+            "sessionId": 66605,
+            "breakOnNext": "WebClient",
+            "executionContext": "DebugAndProfile",
+            "tenant": "c7cb2522-6f1c-4a90-bb9a-5dc58cf91c3f"
+        },
+        {
+            "name": "AL: Generated Attach request",
+            "request": "attach",
+            "type": "al",
+            "environmentType": "Sandbox",
+            "environmentName": "Prueba-Nov-2026",
+            "sessionId": 66605,
+            "breakOnNext": "WebClient",
+            "breakOnError": "ExcludeTry",
+            "tenant": "c7cb2522-6f1c-4a90-bb9a-5dc58cf91c3f"
+        },
+        {
+            "name": "AL: Generated Download Symbols request",
+            "request": "launch",
+            "type": "al",
+            "environmentType": "Sandbox",
+            "environmentName": "Prueba-Nov-2026",
+            "tenant": "c7cb2522-6f1c-4a90-bb9a-5dc58cf91c3f"
         }
     ]
 }
