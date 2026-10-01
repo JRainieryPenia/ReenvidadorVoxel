@@ -187,7 +187,7 @@ page 51100 "RV Transaction Register"
 
                 trigger OnAction()
                 begin
-                    RVResentManagement.DownloadCreditMemoPreview(Rec);
+                    RVResentManagement.DownloadCreditMemoPreview(Rec, CreditMemoNoSeries);
                 end;
             }
             action(RVPreviewCreditMemoXMLZip)
@@ -202,7 +202,7 @@ page 51100 "RV Transaction Register"
                     SelectedRV: Record "RV Transaction Header";
                 begin
                     CurrPage.SetSelectionFilter(SelectedRV);
-                    RVResentManagement.DownloadCreditMemoPreviewZip(SelectedRV);
+                    RVResentManagement.DownloadCreditMemoPreviewZip(SelectedRV, CreditMemoNoSeries);
                 end;
             }
             //Downlaod XML
@@ -244,6 +244,14 @@ page 51100 "RV Transaction Register"
                 begin
                     LoadTransactions();
                 end;
+            }
+            action(RVOpenNCFLog)
+            {
+                Caption = 'NCF Log';
+                ToolTip = 'Opens the log of replaced NCFs and the E34 credit memos that voided each receipt.';
+                Image = Log;
+                ApplicationArea = All;
+                RunObject = page "RV NCF Log";
             }
             action("Import from Excel")
             {
@@ -396,13 +404,24 @@ page 51100 "RV Transaction Register"
         TransactionHeader: Record "LSC Transaction Header";
         NoSeries: Codeunit "No. Series";
         RVResentManagement: Codeunit "RV Resent Management";
+        NCFLogMgt: Codeunit "RV NCF Log Mgt";
         store: Code[10];
         fromDate: Date;
         toDate: Date;
-        CreditMemoNoSeries: Code[10];
+        CreditMemoNoSeries: Code[20];
         nextNumber: Code[20];
         DocumentNoSeriesRef: Code[10];
 
+
+    /// <summary>Serie de la página "Credit Memo No. Series" si está informada; si no, la serie de nota de crédito de la terminal.</summary>
+    local procedure GetCreditMemoSeries(LSPosTerminal: Record "LSC POS Terminal"): Code[20]
+    begin
+        if CreditMemoNoSeries <> '' then
+            exit(CreditMemoNoSeries);
+        if LSPosTerminal."LSDXNCF Nota de Credito" = '' then
+            Error('Select a Credit Memo No. Series on the page or configure NCF for Credit Memo on POS Terminal %1.', LSPosTerminal."No.");
+        exit(LSPosTerminal."LSDXNCF Nota de Credito");
+    end;
 
     local procedure LoadTransactions()
     var
@@ -503,7 +522,7 @@ page 51100 "RV Transaction Register"
         if not LSPosTerminal.Get(Rec."POS Terminal No.") then
             exit(false);
 
-        nextNumber := NoSeries.GetNextNo(LSPosTerminal."LSDXNCF Nota de Credito");
+        nextNumber := NoSeries.GetNextNo(GetCreditMemoSeries(LSPosTerminal));
 
         if TransactionHeader.FindFirst() and Rec.GenerateEFHeader(nextNumber, TransactionHeader, efEncabezado) then begin
             ResultXML := efVoxelRequest.CreateVoxelRequest(efEncabezado);
@@ -518,6 +537,7 @@ page 51100 "RV Transaction Register"
                 Rec."Voided Date" := Today();
                 Rec."XML Document Text" := CopyStr(ResultXML, 1, 2000);
                 Rec.Modify();
+                NCFLogMgt.UpdateLog(Rec."Store No.", Rec."POS Terminal No.", Rec."Transaction No.");
             end;
         end;
         CurrPage.Update();
@@ -596,6 +616,7 @@ page 51100 "RV Transaction Register"
         RVResentManagement: Codeunit "RV Resent Management";
         Archived: Record "EF Archived Sent Request";
         TransactionHeader: Record "LSC Transaction Header";
+        LSPosTerminal: Record "LSC POS Terminal";
         efVoxelRequest: Codeunit "EF VoxelRequest";
         LsEfSoapDocument: Codeunit "LSEF Soap Document";
         CreditMemoNCF: Code[20];
@@ -624,8 +645,17 @@ page 51100 "RV Transaction Register"
 
                 nextNumber := rvTransactionHeader."Voided NCF Credit Memo";
                 if not rvTransactionHeader.Voided then
-                    if (CopyStr(TransactionHeader."LSDX NCF", 1, 3) <> 'E34') then
-                        if TransactionHeader.FindFirst() and Rec.GenerateEFHeader(nextNumber, TransactionHeader, efEncabezado) then begin
+                    if TransactionHeader.FindFirst() and (CopyStr(TransactionHeader."LSDX NCF", 1, 3) <> 'E34') then begin
+                        // Registros importados desde Excel no traen NCF de nota de crédito: se asigna de la serie de la terminal y se
+                        // guarda en el registro para reutilizarlo si el envío falla (sin consumir un número por reintento).
+                        if nextNumber = '' then begin
+                            if not LSPosTerminal.Get(rvTransactionHeader."POS Terminal No.") then
+                                Error('POS Terminal %1 not found.', rvTransactionHeader."POS Terminal No.");
+                            nextNumber := NoSeries.GetNextNo(GetCreditMemoSeries(LSPosTerminal));
+                            rvTransactionHeader."Voided NCF Credit Memo" := nextNumber;
+                            rvTransactionHeader.Modify();
+                        end;
+                        if Rec.GenerateEFHeader(nextNumber, TransactionHeader, efEncabezado) then begin
 
                             ResultXML := efVoxelRequest.CreateVoxelRequest(efEncabezado);
                             ResultXML := VoxelTaxXML.ForCancellation(ResultXML);
@@ -646,8 +676,10 @@ page 51100 "RV Transaction Register"
                                 rvTransactionHeader."Voided Date" := Today();
                                 rvTransactionHeader."XML Document Text" := CopyStr(ResultXML, 1, 2000);
                                 rvTransactionHeader.Modify();
+                                NCFLogMgt.UpdateLog(rvTransactionHeader."Store No.", rvTransactionHeader."POS Terminal No.", rvTransactionHeader."Transaction No.");
                             end;
                         end;
+                    end;
             until rvTransactionHeader.Next() = 0;
     end;
 

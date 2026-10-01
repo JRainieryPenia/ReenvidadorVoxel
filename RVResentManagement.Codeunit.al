@@ -6,6 +6,7 @@ codeunit 51100 "RV Resent Management"
     end;
 
     var
+        NCFLogMgt: Codeunit "RV NCF Log Mgt";
 
     procedure DownloadCreditMemoXML(CreditMemoNCF: Code[20])
     var
@@ -101,6 +102,7 @@ codeunit 51100 "RV Resent Management"
         RVTransaction."LSDX NCF" := NewNCF;
         RVTransaction.ReSent := false;
         RVTransaction.Modify(true);
+        NCFLogMgt.UpdateLog(TransactionHeader."Store No.", TransactionHeader."POS Terminal No.", TransactionHeader."Transaction No.");
     end;
 
     procedure PrepareReplacement(var TransactionHeader: Record "LSC Transaction Header")
@@ -299,7 +301,7 @@ codeunit 51100 "RV Resent Management"
     /// Genera el XML de la nota de crédito (E34) que se enviaría para la transacción, sin enviarlo,
     /// sin consumir NCF y sin modificar el registro. El NCF mostrado es el próximo disponible de la serie.
     /// </summary>
-    procedure BuildCreditMemoXMLPreview(RVTransaction: Record "RV Transaction Header"; var CreditMemoXML: Text; var PreviewNCF: Code[20]): Boolean
+    procedure BuildCreditMemoXMLPreview(RVTransaction: Record "RV Transaction Header"; SeriesOverride: Code[20]; var CreditMemoXML: Text; var PreviewNCF: Code[20]): Boolean
     var
         TransactionHeader: Record "LSC Transaction Header";
         LSPosTerminal: Record "LSC POS Terminal";
@@ -307,6 +309,7 @@ codeunit 51100 "RV Resent Management"
         EFVoxelRequest: Codeunit "EF VoxelRequest";
         VoxelTaxXML: Codeunit "RV Voxel Tax XML";
         NoSeries: Codeunit "No. Series";
+        SeriesCode: Code[20];
     begin
         CreditMemoXML := '';
         TransactionHeader.SetRange("Store No.", RVTransaction."Store No.");
@@ -316,10 +319,13 @@ codeunit 51100 "RV Resent Management"
             exit(false);
         if not LSPosTerminal.Get(TransactionHeader."POS Terminal No.") then
             exit(false);
-        if LSPosTerminal."LSDXNCF Nota de Credito" = '' then
+        SeriesCode := SeriesOverride;
+        if SeriesCode = '' then
+            SeriesCode := LSPosTerminal."LSDXNCF Nota de Credito";
+        if SeriesCode = '' then
             Error('NCF for Credit Memo is not configured on POS Terminal %1', LSPosTerminal."No.");
 
-        PreviewNCF := CopyStr(NoSeries.PeekNextNo(LSPosTerminal."LSDXNCF Nota de Credito", WorkDate()), 1, MaxStrLen(PreviewNCF));
+        PreviewNCF := CopyStr(NoSeries.PeekNextNo(SeriesCode, WorkDate()), 1, MaxStrLen(PreviewNCF));
         if not RVTransaction.GenerateEFHeader(PreviewNCF, TransactionHeader, EFEncabezado) then
             exit(false);
 
@@ -328,7 +334,7 @@ codeunit 51100 "RV Resent Management"
         exit(CreditMemoXML <> '');
     end;
 
-    procedure DownloadCreditMemoPreview(RVTransaction: Record "RV Transaction Header")
+    procedure DownloadCreditMemoPreview(RVTransaction: Record "RV Transaction Header"; SeriesOverride: Code[20])
     var
         TempBlob: Codeunit "Temp Blob";
         XMLStream: InStream;
@@ -337,7 +343,7 @@ codeunit 51100 "RV Resent Management"
         PreviewNCF: Code[20];
         FileName: Text;
     begin
-        if not BuildCreditMemoXMLPreview(RVTransaction, CreditMemoXML, PreviewNCF) then
+        if not BuildCreditMemoXMLPreview(RVTransaction, SeriesOverride, CreditMemoXML, PreviewNCF) then
             Error('No se pudo generar el XML de la nota de crédito para la transacción %1.', RVTransaction."Transaction No.");
         TempBlob.CreateOutStream(XMLOutStream, TextEncoding::UTF8);
         XMLOutStream.WriteText(CreditMemoXML);
@@ -349,7 +355,7 @@ codeunit 51100 "RV Resent Management"
     /// <summary>
     /// Genera en un ZIP los XML de nota de crédito de las transacciones del filtro. Solo vista previa: no envía ni consume NCF.
     /// </summary>
-    procedure DownloadCreditMemoPreviewZip(var RVTransaction: Record "RV Transaction Header")
+    procedure DownloadCreditMemoPreviewZip(var RVTransaction: Record "RV Transaction Header"; SeriesOverride: Code[20])
     var
         DataCompression: Codeunit "Data Compression";
         TempBlobXML: Codeunit "Temp Blob";
@@ -381,7 +387,7 @@ codeunit 51100 "RV Resent Management"
         repeat
             Processed += 1;
             Clear(TempBlobXML);
-            if BuildCreditMemoXMLPreview(RVTransaction, CreditMemoXML, PreviewNCF) then begin
+            if BuildCreditMemoXMLPreview(RVTransaction, SeriesOverride, CreditMemoXML, PreviewNCF) then begin
                 TempBlobXML.CreateOutStream(XMLOutStream, TextEncoding::UTF8);
                 XMLOutStream.WriteText(CreditMemoXML);
                 TempBlobXML.CreateInStream(XMLStream, TextEncoding::UTF8);

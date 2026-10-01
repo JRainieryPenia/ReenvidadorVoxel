@@ -189,6 +189,7 @@ pageextension 51100 "RV Transaction Register Ext" extends "LSC Transaction Regis
                                         RvTransactionRegister."LSDX NCF" := LSCTransactionHeader."LSDX NCF";
                                         RvTransactionRegister.Insert();
                                     end;
+                                    NCFLogMgt.UpdateLog(LSCTransactionHeader."Store No.", LSCTransactionHeader."POS Terminal No.", LSCTransactionHeader."Transaction No.");
 
                                 end;
                             end;
@@ -271,6 +272,7 @@ pageextension 51100 "RV Transaction Register Ext" extends "LSC Transaction Regis
     var
         VoxelTaxXML: Codeunit "RV Voxel Tax XML";
         RVResentManagement: Codeunit "RV Resent Management";
+        NCFLogMgt: Codeunit "RV NCF Log Mgt";
 
 
 
