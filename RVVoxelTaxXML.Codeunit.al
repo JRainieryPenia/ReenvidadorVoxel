@@ -3,12 +3,33 @@ codeunit 51102 "RV Voxel Tax XML"
     procedure ForCancellation(XMLText: Text): Text
     begin
         // Compatibility with the affected historical invoices, not the fiscal rule.
-        exit(SetSummaryBases(XMLText, true));
+        exit(SetModificationCode(SetSummaryBases(XMLText, true), '1'));
     end;
 
     procedure ForResend(XMLText: Text): Text
     begin
         exit(SetSummaryBases(XMLText, false));
+    end;
+
+    /// <summary>
+    /// Fuerza CodigoModificacion en la referencia de la nota de crédito (1 = anula el NCF modificado),
+    /// sin depender del tipo por defecto del setup. Si el XML no tiene referencia, no hace nada.
+    /// </summary>
+    local procedure SetModificationCode(XMLText: Text; ModificationCode: Text) Result: Text
+    var
+        Document: XmlDocument;
+        DOMNodes: XmlNodeList;
+        DOMNode: XmlNode;
+        DOMElement: XmlElement;
+    begin
+        if not XmlDocument.ReadFrom(XMLText, Document) then
+            Error('El documento Voxel no contiene XML válido.');
+        if Document.SelectNodes('/Transaction/References/Reference/PublicAdministration/DOM', DOMNodes) then
+            foreach DOMNode in DOMNodes do begin
+                DOMElement := DOMNode.AsXmlElement();
+                DOMElement.SetAttribute('CodigoModificacion', ModificationCode);
+            end;
+        Document.WriteTo(Result);
     end;
 
     local procedure SetSummaryBases(XMLText: Text; HistoricalBase: Boolean) Result: Text

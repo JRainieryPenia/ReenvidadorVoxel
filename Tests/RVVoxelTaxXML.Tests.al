@@ -112,6 +112,18 @@ codeunit 51148 "RV Voxel Tax XML Tests"
         AssertAttribute(TaxXML.ForResend(ProductionSample()), '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Base', '39.07');
     end;
 
+    [Test]
+    procedure CreditMemoForcesModificationCode1()
+    var
+        Source: Text;
+    begin
+        Source := '<Transaction><ProductList><Product><Taxes><Tax Type="Exento" Rate="0" Base="10.00" Amount="0"/></Taxes></Product></ProductList>' +
+            '<TaxSummary><Tax Type="Exento" Rate="0" Base="10.00" Amount="0"/></TaxSummary>' +
+            '<References><Reference InvoiceNCF="E320000000001"><PublicAdministration><DOM CodigoModificacion="3" IndicadorNotaCredito="0"/></PublicAdministration></Reference></References></Transaction>';
+        AssertAttribute(TaxXML.ForCancellation(Source), '/Transaction/References/Reference/PublicAdministration/DOM/@CodigoModificacion', '1');
+        AssertAttribute(TaxXML.ForResend(Source), '/Transaction/References/Reference/PublicAdministration/DOM/@CodigoModificacion', '3');
+    end;
+
     local procedure ProductionSample(): Text
     begin
         exit('<Transaction><GeneralData Ref="00000P1001000332287" Type="FacturaConsumo" Date="2026-08-31" Currency="DOP" NCF="E320000140425" TaxIncluded="false" ExchangeRate="1.00"/>' +

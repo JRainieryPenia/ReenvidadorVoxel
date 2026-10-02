@@ -1,4 +1,4 @@
-codeunit 51100 "RV Resent Management"
+﻿codeunit 51100 "RV Resent Management"
 {
     trigger OnRun()
     begin
@@ -7,6 +7,87 @@ codeunit 51100 "RV Resent Management"
 
     var
         NCFLogMgt: Codeunit "RV NCF Log Mgt";
+        LastFailureReason: Text;
+
+    /// <summary>
+    /// Valida que el setup permita enviar a Voxel (Online u Offline) y falla con el motivo exacto.
+    /// Antes estos casos salían en silencio sin enviar nada.
+    /// </summary>
+    procedure CheckVoxelReady()
+    var
+        EFSetup: Record "EF Administration Setup";
+    begin
+        if not EFSetup.Get() then
+            Error('No existe la configuración de Facturación Electrónica (EF Administration Setup).');
+        if EFSetup.Provider <> EFSetup.Provider::Voxel then
+            Error('El proveedor de Facturación Electrónica debe ser Voxel; actualmente es %1.', Format(EFSetup.Provider));
+        if not EFSetup."LSEF Use Elec. Service On POS" then
+            Error('"Use Elec. Service On POS" está desactivado en la configuración: el envío no se realiza (ni Online ni Offline).');
+        if EFSetup."EF Voxel Mode" = EFSetup."EF Voxel Mode"::Offline then begin
+            if EFSetup."Offline Signer URL Send(Voxel)" = '' then
+                Error('Voxel Offline: falta "Offline Signer URL Send(Voxel)" en la configuración.');
+        end else begin
+            if EFSetup."URL de Envio (VOXEL)" = '' then
+                Error('Voxel Online: falta "URL de Envio (VOXEL)" en la configuración.');
+            if (EFSetup."Username(Voxel)" = '') or (EFSetup."Password(Voxel)" = '') then
+                Error('Voxel Online: faltan "Username(Voxel)" o "Password(Voxel)" en la configuración.');
+        end;
+    end;
+
+    /// <summary>
+    /// Envía el XML a Voxel. Offline usa el transporte del POS. Online hace el POST aquí (mismo patrón que EF Bulk Credit Memo Handler)
+    /// para poder devolver la respuesta real de Voxel en GetLastFailureReason, y solo da éxito si Voxel devolvió código de seguridad.
+    /// No descarga request/response aunque "Downloads Requests/Response" esté activo: en lotes serían miles de archivos.
+    /// </summary>
+    procedure SendVoxelDocument(XMLText: Text; NCF: Code[20]; DocumentNo: Code[20]): Boolean
+    var
+        EFSetup: Record "EF Administration Setup";
+        LSEFSoapDocument: Codeunit "LSEF Soap Document";
+        VoxelRequest: Codeunit "EF VoxelRequest";
+        VoxelPOS: Codeunit "VOXEL POS";
+        HttpManagement: Codeunit "EF HttpBuilder";
+        ResponseText: Text;
+        ResponseJson: JsonObject;
+        InvoiceRef, NCFRef, Pdf, Qr, SignDate, SecurityCode : Text;
+    begin
+        LastFailureReason := '';
+        CheckVoxelReady();
+        EFSetup.Get();
+
+        if EFSetup."EF Voxel Mode" = EFSetup."EF Voxel Mode"::Offline then begin
+            if LSEFSoapDocument.SendXmlElectronicDocument(XMLText, NCF, false, DocumentNo) then
+                exit(true);
+            LastFailureReason := 'Voxel Offline no confirmó el documento (revise la conexión con el signer y EF Log Message).';
+            exit(false);
+        end;
+
+        HttpManagement.Initialize("EF HttpMethods"::POST, EFSetup."URL de Envio (VOXEL)" + VoxelRequest.DocumentURL(NCF));
+        HttpManagement.AddBody(XMLText);
+        HttpManagement.SetContentType('text/xml;charset=utf-8');
+        HttpManagement.AddBasicAuthentication(EFSetup."Username(Voxel)", EFSetup."Password(Voxel)");
+        HttpManagement.AddRequestHeader('User-Agent', 'Dynamics 365');
+        if not HttpManagement.SendRequest() then begin
+            LastFailureReason := CopyStr('Voxel Online: error HTTP. ' + HttpManagement.GetResponseAsText(), 1, 1000);
+            exit(false);
+        end;
+
+        ResponseText := HttpManagement.GetResponseAsText();
+        if not ResponseJson.ReadFrom(ResponseText) then begin
+            LastFailureReason := CopyStr('Voxel Online: la respuesta no es JSON. ' + ResponseText, 1, 1000);
+            exit(false);
+        end;
+        VoxelRequest.ProssessJson(ResponseJson, InvoiceRef, NCFRef, Pdf, Qr, SignDate, SecurityCode);
+        if SecurityCode = '' then begin
+            LastFailureReason := CopyStr('Voxel Online respondió sin código de seguridad (rechazo). Respuesta: ' + ResponseText, 1, 1000);
+            exit(false);
+        end;
+        exit(VoxelPOS.ProcessDocumentResponse(ResponseJson, NCF, DocumentNo, XMLText));
+    end;
+
+    procedure GetLastFailureReason(): Text
+    begin
+        exit(LastFailureReason);
+    end;
 
     procedure DownloadCreditMemoXML(CreditMemoNCF: Code[20])
     var
@@ -332,6 +413,86 @@ codeunit 51100 "RV Resent Management"
         CreditMemoXML := EFVoxelRequest.CreateVoxelRequest(EFEncabezado);
         CreditMemoXML := VoxelTaxXML.ForCancellation(CreditMemoXML);
         exit(CreditMemoXML <> '');
+    end;
+
+    local procedure BuildCreditMemoXMLForNCF(RVTransaction: Record "RV Transaction Header"; CreditMemoNCF: Code[20]; var CreditMemoXML: Text): Boolean
+    var
+        TransactionHeader: Record "LSC Transaction Header";
+        EFEncabezado: Record "EF Encabezado";
+        EFVoxelRequest: Codeunit "EF VoxelRequest";
+        VoxelTaxXML: Codeunit "RV Voxel Tax XML";
+    begin
+        CreditMemoXML := '';
+        TransactionHeader.SetRange("Store No.", RVTransaction."Store No.");
+        TransactionHeader.SetRange("POS Terminal No.", RVTransaction."POS Terminal No.");
+        TransactionHeader.SetRange("Transaction No.", RVTransaction."Transaction No.");
+        if not TransactionHeader.FindFirst() then
+            exit(false);
+        if not RVTransaction.GenerateEFHeader(CreditMemoNCF, TransactionHeader, EFEncabezado) then
+            exit(false);
+        CreditMemoXML := VoxelTaxXML.ForCancellation(EFVoxelRequest.CreateVoxelRequest(EFEncabezado));
+        exit(CreditMemoXML <> '');
+    end;
+
+    /// <summary>
+    /// Sincroniza filas cuya nota de crédito sí llegó a Voxel pero no quedó marcada en RV Transaction Header.
+    /// Evidencia de envío: EF Archived Sent Request con el NCF de la nota reservado en la fila ("Voided NCF Credit Memo").
+    /// Marca Voided, NCF anulado, fecha y XML, y actualiza el NCF Log. No envía nada a Voxel.
+    /// </summary>
+    procedure SyncSentCreditMemos(var RVTransaction: Record "RV Transaction Header"; var Synced: Integer; var NotFound: Integer; var NoReservedNCF: Integer; var Rebuilt: Integer)
+    var
+        Archived: Record "EF Archived Sent Request";
+        TransactionHeader: Record "LSC Transaction Header";
+        XMLStream: InStream;
+        XMLOutStream: OutStream;
+        CreditMemoXML: Text;
+    begin
+        Synced := 0;
+        NotFound := 0;
+        NoReservedNCF := 0;
+        Rebuilt := 0;
+        if not RVTransaction.FindSet(true) then
+            exit;
+        repeat
+            if not RVTransaction.Voided then
+                if RVTransaction."Voided NCF Credit Memo" = '' then
+                    NoReservedNCF += 1
+                else begin
+                    Archived.Reset();
+                    Archived.SetRange("e-NCF", RVTransaction."Voided NCF Credit Memo");
+                    if not Archived.FindLast() then
+                        NotFound += 1
+                    else
+                        if TransactionHeader.Get(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.") then begin
+                            // Si ya se reemplazó el NCF, la nota afectó el NCF antiguo.
+                            if TransactionHeader."NCF antiguo" <> '' then
+                                RVTransaction."Voided NCF" := TransactionHeader."NCF antiguo"
+                            else
+                                RVTransaction."Voided NCF" := TransactionHeader."LSDX NCF";
+                            RVTransaction.Voided := true;
+                            RVTransaction.ReSent := false;
+                            RVTransaction."Voided Date" := Archived."Posting Date";
+
+                            CreditMemoXML := '';
+                            Archived.CalcFields("XML File");
+                            if Archived."XML File".HasValue() then begin
+                                Clear(RVTransaction."Credit Memo XML");
+                                RVTransaction."Credit Memo XML".CreateOutStream(XMLOutStream, TextEncoding::UTF8);
+                                Archived."XML File".CreateInStream(XMLStream, TextEncoding::UTF8);
+                                CopyStream(XMLOutStream, XMLStream);
+                            end else
+                                if BuildCreditMemoXMLForNCF(RVTransaction, RVTransaction."Voided NCF Credit Memo", CreditMemoXML) then begin
+                                    RVTransaction.SetCreditMemoXML(CreditMemoXML);
+                                    RVTransaction."XML Document Text" := CopyStr(CreditMemoXML, 1, 2000);
+                                    Rebuilt += 1;
+                                end;
+                            RVTransaction.Modify();
+                            NCFLogMgt.UpdateLog(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.");
+                            Synced += 1;
+                        end else
+                            NotFound += 1;
+                end;
+        until RVTransaction.Next() = 0;
     end;
 
     procedure DownloadCreditMemoPreview(RVTransaction: Record "RV Transaction Header"; SeriesOverride: Code[20])

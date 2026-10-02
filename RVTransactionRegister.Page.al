@@ -178,6 +178,36 @@ page 51100 "RV Transaction Register"
                     Management.DownloadCreditMemoXML(Rec."Voided NCF Credit Memo");
                 end;
             }
+            action(RVSyncSelected)
+            {
+                Caption = 'Sync Sent Credit Memos (Selected)';
+                ToolTip = 'For selected rows whose credit memo was sent to Voxel but not marked here: marks them as voided, stores the voided NCF and credit memo XML, and updates the NCF Log. Does not send anything.';
+                ApplicationArea = All;
+                Image = Refresh;
+
+                trigger OnAction()
+                var
+                    SelectedRV: Record "RV Transaction Header";
+                begin
+                    CurrPage.SetSelectionFilter(SelectedRV);
+                    SyncCreditMemos(SelectedRV);
+                end;
+            }
+            action(RVSyncFiltered)
+            {
+                Caption = 'Sync Sent Credit Memos (All Filtered)';
+                ToolTip = 'Same as the selected version, for all rows in the current view/filter. Does not send anything.';
+                ApplicationArea = All;
+                Image = RefreshLines;
+
+                trigger OnAction()
+                var
+                    FilteredRV: Record "RV Transaction Header";
+                begin
+                    FilteredRV.CopyFilters(Rec);
+                    SyncCreditMemos(FilteredRV);
+                end;
+            }
             action(RVPreviewCreditMemoXML)
             {
                 Caption = 'Preview Credit Memo XML';
@@ -423,6 +453,18 @@ page 51100 "RV Transaction Register"
         exit(LSPosTerminal."LSDXNCF Nota de Credito");
     end;
 
+    local procedure SyncCreditMemos(var RVTransaction: Record "RV Transaction Header")
+    var
+        Synced: Integer;
+        NotFound: Integer;
+        NoReservedNCF: Integer;
+        Rebuilt: Integer;
+    begin
+        RVResentManagement.SyncSentCreditMemos(RVTransaction, Synced, NotFound, NoReservedNCF, Rebuilt);
+        CurrPage.Update(false);
+        Message('Sincronizadas: %1 (XML reconstruido por no estar archivado: %2). Sin registro de envío en Voxel para el NCF reservado: %3. Sin NCF de nota reservado: %4.', Synced, Rebuilt, NotFound, NoReservedNCF);
+    end;
+
     local procedure LoadTransactions()
     var
         rvTransactionHeader: Record "RV Transaction Header";
@@ -505,11 +547,8 @@ page 51100 "RV Transaction Register"
         if Rec."Voided" then
             exit(true);
 
-        if not AdministrationSetup.Get() then
-            exit(false);
-
-        if (AdministrationSetup.Provider <> AdministrationSetup.Provider::Voxel) then
-            exit(false);
+        RVResentManagement.CheckVoxelReady();
+        AdministrationSetup.Get();
 
         TransactionHeader.Reset();
         TransactionHeader.SetRange("Store No.", Rec."Store No.");
@@ -527,7 +566,7 @@ page 51100 "RV Transaction Register"
         if TransactionHeader.FindFirst() and Rec.GenerateEFHeader(nextNumber, TransactionHeader, efEncabezado) then begin
             ResultXML := efVoxelRequest.CreateVoxelRequest(efEncabezado);
             ResultXML := VoxelTaxXML.ForCancellation(ResultXML);
-            success := LsEfSoapDocument.SendXmlElectronicDocument(ResultXML, nextNumber, false, CopyStr(efEncabezado.DocumentNo, 1, 20));
+            success := RVResentManagement.SendVoxelDocument(ResultXML, nextNumber, CopyStr(efEncabezado.DocumentNo, 1, 20));
             if success then begin
                 Rec."Voided" := true;
                 Rec.ReSent := false;
@@ -623,16 +662,16 @@ page 51100 "RV Transaction Register"
         ResultXML: Text;
         success: Boolean;
         counter: Integer;
+        SuccessCount: Integer;
+        FailedCount: Integer;
+        FirstFailure: Text;
         ReferenceNo: Code[20];
     begin
 
         CurrPage.SetSelectionFilter(rvTransactionHeader);
 
-        if not AdministrationSetup.Get() then
-            exit;
-
-        if (AdministrationSetup.Provider <> AdministrationSetup.Provider::Voxel) then
-            exit;
+        RVResentManagement.CheckVoxelReady();
+        AdministrationSetup.Get();
 
         if rvTransactionHeader.FindSet() then
             repeat
@@ -666,7 +705,14 @@ page 51100 "RV Transaction Register"
                             if Archived.FindSet() then
                                 Archived.DeleteAll();
                             efEncabezado.DocumentNo := ReferenceNo;
-                            success := LsEfSoapDocument.SendXmlElectronicDocument(ResultXML, nextNumber, false, CopyStr(efEncabezado.DocumentNo, 1, 20));
+                            success := RVResentManagement.SendVoxelDocument(ResultXML, nextNumber, CopyStr(efEncabezado.DocumentNo, 1, 20));
+                            if success then
+                                SuccessCount += 1
+                            else begin
+                                FailedCount += 1;
+                                if FirstFailure = '' then
+                                    FirstFailure := '\Primer error (' + nextNumber + '): ' + RVResentManagement.GetLastFailureReason();
+                            end;
                             if success then begin
                                 rvTransactionHeader."Voided" := true;
                                 rvTransactionHeader.ReSent := false;
@@ -681,6 +727,7 @@ page 51100 "RV Transaction Register"
                         end;
                     end;
             until rvTransactionHeader.Next() = 0;
+        Message('Notas de crédito enviadas: %1. No confirmadas por Voxel: %2.%3', SuccessCount, FailedCount, FirstFailure);
     end;
 
 
@@ -795,11 +842,8 @@ page 51100 "RV Transaction Register"
         if Rec.ReSent and new then
             exit(true);
 
-        if not AdministrationSetup.Get() then
-            exit(false);
-
-        if (AdministrationSetup.Provider <> AdministrationSetup.Provider::Voxel) then
-            exit(false);
+        RVResentManagement.CheckVoxelReady();
+        AdministrationSetup.Get();
 
         TransactionHeader.Reset();
         TransactionHeader.SetRange("Store No.", Rec."Store No.");
@@ -820,7 +864,7 @@ page 51100 "RV Transaction Register"
             ResultXML := efVoxelRequest.CreateVoxelRequest(efEncabezado);
             ResultXML := VoxelTaxXML.ForResend(ResultXML);
             efEncabezado.DocumentNo := newReferenceNo;
-            success := LsEfSoapDocument.SendXmlElectronicDocument(ResultXML, TransactionHeader."LSDX NCF", false, CopyStr(efEncabezado.DocumentNo, 1, 20));
+            success := RVResentManagement.SendVoxelDocument(ResultXML, TransactionHeader."LSDX NCF", CopyStr(efEncabezado.DocumentNo, 1, 20));
             if success then begin
                 Archived.Reset();
                 Archived.SetRange("Document No.", newReferenceNo);
