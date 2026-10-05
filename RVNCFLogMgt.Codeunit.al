@@ -42,6 +42,8 @@ codeunit 51104 "RV NCF Log Mgt"
                     NCFLog."Credit Memo Logged At" := CurrentDateTime();
                 NCFLog."Credit Memo NCF" := RVTransaction."Voided NCF Credit Memo";
                 NCFLog."Affected NCF" := RVTransaction."Voided NCF";
+                NCFLog."Credit Memo Security Code" := RVTransaction."Credit Memo Security Code";
+                NCFLog."Credit Memo Stamped At" := RVTransaction."Credit Memo Stamped At";
             end;
 
         NCFLog."Last Updated At" := CurrentDateTime();
@@ -67,12 +69,14 @@ codeunit 51104 "RV NCF Log Mgt"
         Tab[1] := 9;
         Builder.AppendLine('Store No.' + Tab + 'POS Terminal No.' + Tab + 'Transaction No.' + Tab + 'Receipt No.' + Tab + 'Transaction Date' + Tab +
             'Old NCF' + Tab + 'Replacement NCF' + Tab + 'Current NCF' + Tab + 'Credit Memo NCF (E34)' + Tab + 'NCF Affected by Credit Memo' + Tab +
+            'Credit Memo Security Code' + Tab + 'Credit Memo Stamped Date/Time' + Tab +
             'Replacement Logged At' + Tab + 'Credit Memo Logged At' + Tab + 'User ID');
         repeat
             Builder.AppendLine(NCFLog."Store No." + Tab + NCFLog."POS Terminal No." + Tab + Format(NCFLog."Transaction No.", 0, 9) + Tab +
                 NCFLog."Receipt No." + Tab + Format(NCFLog."Transaction Date", 0, 9) + Tab +
                 NCFLog."Old NCF" + Tab + NCFLog."Replacement NCF" + Tab + NCFLog."Current NCF" + Tab +
                 NCFLog."Credit Memo NCF" + Tab + NCFLog."Affected NCF" + Tab +
+                NCFLog."Credit Memo Security Code" + Tab + NCFLog."Credit Memo Stamped At" + Tab +
                 Format(NCFLog."Replacement Logged At", 0, 9) + Tab + Format(NCFLog."Credit Memo Logged At", 0, 9) + Tab + NCFLog."User ID");
         until NCFLog.Next() = 0;
 

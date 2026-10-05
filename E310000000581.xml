@@ -1,0 +1,77 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+
+<Transaction xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <GeneralData Ref="00000P1001000333714" Type="FacturaComercial" Date="2026-09-04" Currency="DOP" NCF="E310000000581" NCFExpirationDate="2027-12-31" TaxIncluded="false" ExchangeRate="1.00">
+    <PublicAdministration>
+      <DOM TipoIngreso="01" TipoPago="1" LinesPerPrintedPage="25" />
+    </PublicAdministration>
+  </GeneralData>
+  <Supplier CIF="132236254" Company="JET LAG A&amp;B SRL" Address="Aut. Boulevard Turistico del Este No. 1" Country="DOM" />
+  <Client CIF="130883068" Company="BLUE DIAMOND CONSTRUCTION GROUP SAS" Address="" Country="" />
+  <ProductList>
+    <Product SupplierSKU="R0304" Item="P/D VIERNES JL" Qty="1.00" UP="273.44" Total="273.44" NetAmount="273.44" SysLineType="1">
+      <Taxes>
+        <Tax Type="ITBIS" Rate="18" Base="273.44" Amount="49.22" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0278" Item="PTY-Arroz Blanco P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0465" Item="Habichuelas Negra Natural" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0297" Item="PTY-Platano Frito P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0273" Item="PTY -Ensalada Rusa P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0521" Item=" PTY Bacalao con Papa P/D." Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0304" Item="P/D VIERNES JL" Qty="1.00" UP="273.44" Total="273.44" NetAmount="273.44" SysLineType="1">
+      <Taxes>
+        <Tax Type="ITBIS" Rate="18" Base="273.44" Amount="49.22" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0278" Item="PTY-Arroz Blanco P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0465" Item="Habichuelas Negra Natural" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0273" Item="PTY -Ensalada Rusa P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0521" Item=" PTY Bacalao con Papa P/D." Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+    <Product SupplierSKU="R0297" Item="PTY-Platano Frito P/D" Qty="1.00" UP="0.00" Total="0.00" NetAmount="0.00" SysLineType="1">
+      <Taxes>
+        <Tax Type="Exento" Rate="0" Base="0.00" Amount="0" />
+      </Taxes>
+    </Product>
+  </ProductList>
+  <TaxSummary>
+    <Tax Type="ITBIS" Rate="18" Base="546.88" Amount="98.44" />
+  </TaxSummary>
+  <TotalSummary SubTotal="546.88" Tax="98.44" Total="645.32" />
+</Transaction>

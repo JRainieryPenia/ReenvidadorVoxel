@@ -36,6 +36,16 @@ page 51102 "RV NCF Log"
                     ApplicationArea = All;
                     ToolTip = 'E34 credit memo that voided the original NCF.';
                 }
+                field("Credit Memo Security Code"; Rec."Credit Memo Security Code")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Security code returned by Voxel for the credit memo.';
+                }
+                field("Credit Memo Stamped At"; Rec."Credit Memo Stamped At")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Stamped date returned by Voxel for the credit memo.';
+                }
                 field("Affected NCF"; Rec."Affected NCF")
                 {
                     ApplicationArea = All;

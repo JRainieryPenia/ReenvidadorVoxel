@@ -101,6 +101,18 @@ table 51100 "RV Transaction Header"
             Caption = 'XML Document Text';
             Description = 'Contains the XML document generated for the transaction.';
         }
+        field(51111; "Credit Memo Security Code"; Text[100])
+        {
+            DataClassification = CustomerContent;
+            Caption = 'Credit Memo Security Code';
+            Description = 'Security code returned by Voxel for the credit memo. Voided is only valid when this is filled.';
+        }
+        field(51112; "Credit Memo Stamped At"; Text[50])
+        {
+            DataClassification = CustomerContent;
+            Caption = 'Credit Memo Stamped Date/Time';
+            Description = 'Stamped date returned by Voxel for the credit memo.';
+        }
     }
 
     keys
@@ -108,6 +120,9 @@ table 51100 "RV Transaction Header"
         key(Key1; "Store No.", "POS Terminal No.", "Transaction No.")
         {
             Clustered = true;
+        }
+        key(Key2; "Voided NCF Credit Memo")
+        {
         }
     }
 
@@ -644,6 +659,10 @@ table 51100 "RV Transaction Header"
                     NoInvoiceAmount += Abs(Item."Unit Price") * Abs(LscTransSalesEntry.Quantity);
             until LscTransSalesEntry.Next() = 0;
 
+        // La nota de crédito (E34) no lleva monto no facturable: la DGII rechaza el campo MontoNoFacturable cuando la factura
+        // afectada tiene líneas en cero. Mismo criterio que EF Bulk Credit Memo Handler (MontoNoFacturable = 0, período = total).
+        if CreditMemoNCF <> '' then
+            NoInvoiceAmount := 0;
         EFEncabezado.MontoNoFacturable := Abs(NoInvoiceAmount) / CurrencyFactor;
         PeriodAmount := Abs(MontoTotal + NoInvoiceAmount);
         EFEncabezado.MontoPeriodo := Abs(PeriodAmount) / CurrencyFactor;

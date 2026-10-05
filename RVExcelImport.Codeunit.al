@@ -55,6 +55,11 @@ codeunit 51103 "RV Excel Import"
         Found: Boolean;
         NCFIndexLoaded: Boolean;
         FirstNotFound: Text;
+        CreditMemoRows: Integer;
+        ResetForResend: Integer;
+        KeptWithProof: Integer;
+        RowsReset: Integer;
+        RowsKept: Integer;
     begin
         ExcelBuffer.Reset();
         ExcelBuffer.SetRange("Column No.", 1);
@@ -70,7 +75,24 @@ codeunit 51103 "RV Excel Import"
         repeat
             Processed += 1;
             DocumentNo := DelChr(ExcelBuffer."Cell Value as Text", '<>', ' ');
-            if DocumentNo <> '' then begin
+            if (DocumentNo <> '') and (CopyStr(UpperCase(DocumentNo), 1, 3) = 'E34') then begin
+                // NCF de una nota de crédito ya generada por este módulo (p. ej. rechazada por Voxel): se ubica la fila por
+                // "Voided NCF Credit Memo" y se deja lista para reenviar. Si Voxel ya la selló (código de seguridad), se conserva.
+                RVHeader.Reset();
+                RVHeader.SetCurrentKey("Voided NCF Credit Memo");
+                RVHeader.SetRange("Voided NCF Credit Memo", CopyStr(UpperCase(DocumentNo), 1, MaxStrLen(RVHeader."Voided NCF Credit Memo")));
+                if RVHeader.IsEmpty() then begin
+                    NotFound += 1;
+                    if FirstNotFound = '' then
+                        FirstNotFound := DocumentNo;
+                end else begin
+                    CreditMemoRows += RVHeader.Count();
+                    ResetCreditMemoRows(RVHeader, RowsReset, RowsKept);
+                    ResetForResend += RowsReset;
+                    KeptWithProof += RowsKept;
+                end;
+            end else
+                if DocumentNo <> '' then begin
                 Found := FindByReceiptNo(TransHeader, CopyStr(DocumentNo, 1, MaxStrLen(TransHeader."Receipt No.")));
                 if not Found then begin
                     if not NCFIndexLoaded then begin
@@ -108,6 +130,15 @@ codeunit 51103 "RV Excel Import"
 
         Progress.Close();
         Message(ImportResultMsg, Created, Existing, NotFound, FirstNotFound);
+        if CreditMemoRows > 0 then
+            Message(CreditMemoResultMsg, CreditMemoRows, ResetForResend, KeptWithProof);
+    end;
+
+    local procedure ResetCreditMemoRows(var RVHeader: Record "RV Transaction Header"; var RowsReset: Integer; var RowsKept: Integer)
+    var
+        RVResentManagement: Codeunit "RV Resent Management";
+    begin
+        RVResentManagement.UnmarkVoidedRows(RVHeader, RowsReset, RowsKept);
     end;
 
     local procedure FindByReceiptNo(var TransHeader: Record "LSC Transaction Header"; ReceiptNo: Code[20]): Boolean
@@ -156,4 +187,5 @@ codeunit 51103 "RV Excel Import"
         TemplateSheetNameLbl: Label 'Import Template';
         ProgressLbl: Label 'Importing transactions...\Processed #1######## of #2########';
         ImportResultMsg: Label 'Import completed. Created: %1, Already loaded: %2, Not found: %3. First not found: %4';
+        CreditMemoResultMsg: Label 'E34 credit memo NCFs found in the module: %1. Reset for resend: %2. Kept as voided because Voxel already stamped them: %3.';
 }

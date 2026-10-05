@@ -42,7 +42,6 @@
     procedure SendVoxelDocument(XMLText: Text; NCF: Code[20]; DocumentNo: Code[20]): Boolean
     var
         EFSetup: Record "EF Administration Setup";
-        LSEFSoapDocument: Codeunit "LSEF Soap Document";
         VoxelRequest: Codeunit "EF VoxelRequest";
         VoxelPOS: Codeunit "VOXEL POS";
         HttpManagement: Codeunit "EF HttpBuilder";
@@ -55,10 +54,7 @@
         EFSetup.Get();
 
         if EFSetup."EF Voxel Mode" = EFSetup."EF Voxel Mode"::Offline then begin
-            if LSEFSoapDocument.SendXmlElectronicDocument(XMLText, NCF, false, DocumentNo) then
-                exit(true);
-            LastFailureReason := 'Voxel Offline no confirmó el documento (revise la conexión con el signer y EF Log Message).';
-            exit(false);
+            exit(SendOffline(XMLText, NCF, DocumentNo));
         end;
 
         HttpManagement.Initialize("EF HttpMethods"::POST, EFSetup."URL de Envio (VOXEL)" + VoxelRequest.DocumentURL(NCF));
@@ -82,6 +78,55 @@
             exit(false);
         end;
         exit(VoxelPOS.ProcessDocumentResponse(ResponseJson, NCF, DocumentNo, XMLText));
+    end;
+
+    /// <summary>
+    /// Voxel Offline: mismo POST JSON que LSEF Voxel OfflineSigner.SendInvoice (posId, storeId, xmlBill), pero conservando
+    /// el estado, el mensaje y la respuesta del signer para explicar el rechazo. Solo da éxito con billIdentifier (código de seguridad).
+    /// </summary>
+    local procedure SendOffline(XMLText: Text; NCF: Code[20]; DocumentNo: Code[20]): Boolean
+    var
+        EFSetup: Record "EF Administration Setup";
+        OfflineSigner: Codeunit "LSEF Voxel OfflineSigner";
+        HttpClientRequest: HttpClient;
+        HttpRequestMessageInfo: HttpRequestMessage;
+        HttpResponseMessageInfo: HttpResponseMessage;
+        HttpContentInfo: HttpContent;
+        HttpHeaderContent: HttpHeaders;
+        ResponseText: Text;
+        ResponseJson: JsonObject;
+        Status, ResponseMessage, BillIdentifier, BillDate : Text;
+    begin
+        EFSetup.Get();
+        HttpRequestMessageInfo.SetRequestUri(EFSetup."Offline Signer URL Send(Voxel)");
+        HttpRequestMessageInfo.Method := 'POST';
+        HttpContentInfo.WriteFrom(OfflineSigner.SetJson(EFSetup.PosID, EFSetup.StoreId, XMLText));
+        HttpContentInfo.GetHeaders(HttpHeaderContent);
+        HttpHeaderContent.Clear();
+        HttpHeaderContent.Add('Content-Type', 'application/json');
+        HttpRequestMessageInfo.Content(HttpContentInfo);
+        HttpClientRequest.DefaultRequestHeaders.Add('User-Agent', 'Dynamics 365');
+        HttpClientRequest.DefaultRequestHeaders.Add('Accept', 'application/json');
+
+        if not HttpClientRequest.Send(HttpRequestMessageInfo, HttpResponseMessageInfo) then begin
+            LastFailureReason := 'Voxel Offline: no hay conexión con el signer (' + EFSetup."Offline Signer URL Send(Voxel)" + '). ' + GetLastErrorText();
+            exit(false);
+        end;
+        HttpResponseMessageInfo.Content.ReadAs(ResponseText);
+        if not HttpResponseMessageInfo.IsSuccessStatusCode() then begin
+            LastFailureReason := CopyStr(StrSubstNo('Voxel Offline: HTTP %1 %2. %3', HttpResponseMessageInfo.HttpStatusCode(), HttpResponseMessageInfo.ReasonPhrase(), ResponseText), 1, 1000);
+            exit(false);
+        end;
+        if not ResponseJson.ReadFrom(ResponseText) then begin
+            LastFailureReason := CopyStr('Voxel Offline: la respuesta no es JSON. ' + ResponseText, 1, 1000);
+            exit(false);
+        end;
+        OfflineSigner.ProcessOfflineJson(ResponseJson, Status, ResponseMessage, BillIdentifier, BillDate);
+        if BillIdentifier = '' then begin
+            LastFailureReason := CopyStr(StrSubstNo('Voxel Offline respondió sin código de seguridad (estado: %1, mensaje: %2). Respuesta: %3', Status, ResponseMessage, ResponseText), 1, 1000);
+            exit(false);
+        end;
+        exit(OfflineSigner.ProcessOfflinePOSDocumentResponse(ResponseJson, NCF, DocumentNo, XMLText));
     end;
 
     procedure GetLastFailureReason(): Text
@@ -434,12 +479,38 @@
         exit(CreditMemoXML <> '');
     end;
 
+    /// <summary>Lee el comprobante (código de seguridad y fecha de sello) archivado para el documento enviado.</summary>
+    procedure GetSignature(DocumentNo: Code[20]; var SecurityCode: Text; var StampedAt: Text): Boolean
+    var
+        Archived: Record "EF Archived Sent Request";
+    begin
+        Archived.SetRange("Document No.", DocumentNo);
+        Archived.SetFilter("Security Code", '<>%1', '');
+        if not Archived.FindLast() then
+            exit(false);
+        SecurityCode := Format(Archived."Security Code");
+        StampedAt := Format(Archived."Signed Date");
+        exit(true);
+    end;
+
+    /// <summary>Guarda en la fila el comprobante de Voxel del documento recién enviado. No hace Modify.</summary>
+    procedure StampSignature(var RVTransaction: Record "RV Transaction Header"; DocumentNo: Code[20])
+    var
+        SecurityCode: Text;
+        StampedAt: Text;
+    begin
+        if GetSignature(DocumentNo, SecurityCode, StampedAt) then begin
+            RVTransaction."Credit Memo Security Code" := CopyStr(SecurityCode, 1, MaxStrLen(RVTransaction."Credit Memo Security Code"));
+            RVTransaction."Credit Memo Stamped At" := CopyStr(StampedAt, 1, MaxStrLen(RVTransaction."Credit Memo Stamped At"));
+        end;
+    end;
+
     /// <summary>
-    /// Sincroniza filas cuya nota de crédito sí llegó a Voxel pero no quedó marcada en RV Transaction Header.
-    /// Evidencia de envío: EF Archived Sent Request con el NCF de la nota reservado en la fila ("Voided NCF Credit Memo").
-    /// Marca Voided, NCF anulado, fecha y XML, y actualiza el NCF Log. No envía nada a Voxel.
+    /// Valida una fila contra el comprobante de Voxel (EF Archived Sent Request con el NCF de la nota y código de seguridad).
+    /// Resultado: 1 = validada y marcada ahora, 2 = sin comprobante (si estaba marcada como anulada se desmarca),
+    /// 3 = sin NCF de nota reservado, 4 = ya estaba validada.
     /// </summary>
-    procedure SyncSentCreditMemos(var RVTransaction: Record "RV Transaction Header"; var Synced: Integer; var NotFound: Integer; var NoReservedNCF: Integer; var Rebuilt: Integer)
+    procedure SyncRow(var RVTransaction: Record "RV Transaction Header"; var Rebuilt: Boolean): Integer
     var
         Archived: Record "EF Archived Sent Request";
         TransactionHeader: Record "LSC Transaction Header";
@@ -447,51 +518,128 @@
         XMLOutStream: OutStream;
         CreditMemoXML: Text;
     begin
-        Synced := 0;
-        NotFound := 0;
-        NoReservedNCF := 0;
-        Rebuilt := 0;
+        Rebuilt := false;
+        if RVTransaction.Voided and (RVTransaction."Credit Memo Security Code" <> '') then
+            exit(4);
+        if RVTransaction."Voided NCF Credit Memo" = '' then begin
+            if RVTransaction.Voided then begin
+                RVTransaction.Voided := false;
+                RVTransaction.Modify();
+            end;
+            exit(3);
+        end;
+
+        Archived.SetRange("e-NCF", RVTransaction."Voided NCF Credit Memo");
+        Archived.SetFilter("Security Code", '<>%1', '');
+        if not Archived.FindLast() or not TransactionHeader.Get(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.") then begin
+            if RVTransaction.Voided then begin
+                RVTransaction.Voided := false;
+                RVTransaction.Modify();
+            end;
+            exit(2);
+        end;
+
+        // Si ya se reemplazó el NCF, la nota afectó el NCF antiguo.
+        if RVTransaction."Voided NCF" = '' then
+            if TransactionHeader."NCF antiguo" <> '' then
+                RVTransaction."Voided NCF" := TransactionHeader."NCF antiguo"
+            else
+                RVTransaction."Voided NCF" := TransactionHeader."LSDX NCF";
+        RVTransaction.Voided := true;
+        RVTransaction.ReSent := false;
+        RVTransaction."Voided Date" := Archived."Posting Date";
+        RVTransaction."Credit Memo Security Code" := CopyStr(Format(Archived."Security Code"), 1, MaxStrLen(RVTransaction."Credit Memo Security Code"));
+        RVTransaction."Credit Memo Stamped At" := CopyStr(Format(Archived."Signed Date"), 1, MaxStrLen(RVTransaction."Credit Memo Stamped At"));
+
+        RVTransaction.CalcFields("Credit Memo XML");
+        if not RVTransaction."Credit Memo XML".HasValue() then begin
+            Archived.CalcFields("XML File");
+            if Archived."XML File".HasValue() then begin
+                Clear(RVTransaction."Credit Memo XML");
+                RVTransaction."Credit Memo XML".CreateOutStream(XMLOutStream, TextEncoding::UTF8);
+                Archived."XML File".CreateInStream(XMLStream, TextEncoding::UTF8);
+                CopyStream(XMLOutStream, XMLStream);
+            end else
+                if BuildCreditMemoXMLForNCF(RVTransaction, RVTransaction."Voided NCF Credit Memo", CreditMemoXML) then begin
+                    RVTransaction.SetCreditMemoXML(CreditMemoXML);
+                    RVTransaction."XML Document Text" := CopyStr(CreditMemoXML, 1, 2000);
+                    Rebuilt := true;
+                end;
+        end;
+        RVTransaction.Modify();
+        NCFLogMgt.UpdateLog(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.");
+        exit(1);
+    end;
+
+    /// <summary>
+    /// Desmarca filas anuladas para poder reenviarlas, sin exigir que el NCF de la nota esté vacío.
+    /// Busca el NCF de la nota (E34) en lo archivado de Voxel: con código de seguridad es una nota realmente emitida y la fila
+    /// se conserva como anulada (se completa con el comprobante); sin código se desmarca. El NCF reservado se conserva para reutilizarlo.
+    /// </summary>
+    procedure UnmarkVoidedRows(var RVTransaction: Record "RV Transaction Header"; var Unmarked: Integer; var KeptWithProof: Integer)
+    var
+        Archived: Record "EF Archived Sent Request";
+        Rebuilt: Boolean;
+    begin
+        Unmarked := 0;
+        KeptWithProof := 0;
         if not RVTransaction.FindSet(true) then
             exit;
         repeat
-            if not RVTransaction.Voided then
-                if RVTransaction."Voided NCF Credit Memo" = '' then
-                    NoReservedNCF += 1
-                else begin
-                    Archived.Reset();
-                    Archived.SetRange("e-NCF", RVTransaction."Voided NCF Credit Memo");
-                    if not Archived.FindLast() then
-                        NotFound += 1
-                    else
-                        if TransactionHeader.Get(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.") then begin
-                            // Si ya se reemplazó el NCF, la nota afectó el NCF antiguo.
-                            if TransactionHeader."NCF antiguo" <> '' then
-                                RVTransaction."Voided NCF" := TransactionHeader."NCF antiguo"
-                            else
-                                RVTransaction."Voided NCF" := TransactionHeader."LSDX NCF";
-                            RVTransaction.Voided := true;
-                            RVTransaction.ReSent := false;
-                            RVTransaction."Voided Date" := Archived."Posting Date";
-
-                            CreditMemoXML := '';
-                            Archived.CalcFields("XML File");
-                            if Archived."XML File".HasValue() then begin
-                                Clear(RVTransaction."Credit Memo XML");
-                                RVTransaction."Credit Memo XML".CreateOutStream(XMLOutStream, TextEncoding::UTF8);
-                                Archived."XML File".CreateInStream(XMLStream, TextEncoding::UTF8);
-                                CopyStream(XMLOutStream, XMLStream);
-                            end else
-                                if BuildCreditMemoXMLForNCF(RVTransaction, RVTransaction."Voided NCF Credit Memo", CreditMemoXML) then begin
-                                    RVTransaction.SetCreditMemoXML(CreditMemoXML);
-                                    RVTransaction."XML Document Text" := CopyStr(CreditMemoXML, 1, 2000);
-                                    Rebuilt += 1;
-                                end;
-                            RVTransaction.Modify();
-                            NCFLogMgt.UpdateLog(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.");
-                            Synced += 1;
-                        end else
-                            NotFound += 1;
+            if RVTransaction.Voided then begin
+                Archived.Reset();
+                Archived.SetRange("e-NCF", RVTransaction."Voided NCF Credit Memo");
+                Archived.SetFilter("Security Code", '<>%1', '');
+                if (RVTransaction."Voided NCF Credit Memo" <> '') and not Archived.IsEmpty() then begin
+                    SyncRow(RVTransaction, Rebuilt);
+                    KeptWithProof += 1;
+                end else begin
+                    RVTransaction.Voided := false;
+                    RVTransaction."Credit Memo Security Code" := '';
+                    RVTransaction."Credit Memo Stamped At" := '';
+                    RVTransaction.Modify();
+                    Unmarked += 1;
                 end;
+            end;
+        until RVTransaction.Next() = 0;
+    end;
+
+    /// <summary>
+    /// Valida por comprobante de Voxel todas las filas con NCF de nota reservado: marca las que tienen código de seguridad
+    /// y desmarca las marcadas como anuladas sin comprobante. No envía nada a Voxel.
+    /// </summary>
+    procedure SyncSentCreditMemos(var RVTransaction: Record "RV Transaction Header"; var Synced: Integer; var NoProof: Integer; var NoReservedNCF: Integer; var Rebuilt: Integer; var AlreadyOk: Integer; var Unmarked: Integer)
+    var
+        WasVoided: Boolean;
+        RowRebuilt: Boolean;
+    begin
+        Synced := 0;
+        NoProof := 0;
+        NoReservedNCF := 0;
+        Rebuilt := 0;
+        AlreadyOk := 0;
+        Unmarked := 0;
+        if not RVTransaction.FindSet(true) then
+            exit;
+        repeat
+            WasVoided := RVTransaction.Voided;
+            case SyncRow(RVTransaction, RowRebuilt) of
+                1:
+                    begin
+                        Synced += 1;
+                        if RowRebuilt then
+                            Rebuilt += 1;
+                    end;
+                2:
+                    if WasVoided then
+                        Unmarked += 1
+                    else
+                        NoProof += 1;
+                3:
+                    NoReservedNCF += 1;
+                4:
+                    AlreadyOk += 1;
+            end;
         until RVTransaction.Next() = 0;
     end;
 

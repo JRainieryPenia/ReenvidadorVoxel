@@ -1,9 +1,24 @@
 codeunit 51102 "RV Voxel Tax XML"
 {
+    // Estado compartido en la sesión: la página lo fija y las rutas de nota de crédito en otros codeunits lo respetan.
+    SingleInstance = true;
+
+    var
+        UseCorrectedBase: Boolean;
+
+    /// <summary>
+    /// false (por defecto): la nota usa la base histórica (base + ITBIS) para igualar facturas enviadas con ese cálculo.
+    /// true: la nota usa la base correcta de las líneas, para facturas cuyo XML enviado ya tenía la base correcta.
+    /// </summary>
+    procedure SetCorrectedBase(Corrected: Boolean)
+    begin
+        UseCorrectedBase := Corrected;
+    end;
+
     procedure ForCancellation(XMLText: Text): Text
     begin
-        // Compatibility with the affected historical invoices, not the fiscal rule.
-        exit(SetModificationCode(SetSummaryBases(XMLText, true), '1'));
+        // Por defecto: compatibilidad con las facturas históricas afectadas, no la regla fiscal.
+        exit(SetModificationCode(SetSummaryBases(XMLText, not UseCorrectedBase), '1'));
     end;
 
     procedure ForResend(XMLText: Text): Text

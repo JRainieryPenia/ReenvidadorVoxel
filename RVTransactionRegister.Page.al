@@ -41,6 +41,17 @@ page 51100 "RV Transaction Register"
                     ToolTip = 'Select the number series for credit memos when voiding transactions.';
                     ApplicationArea = All;
                 }
+                field(CorrectedCreditMemoBase; CorrectedCreditMemoBase)
+                {
+                    Caption = 'Credit memo: corrected ITBIS base';
+                    ToolTip = 'Off (default): credit memos use the historical base (base + ITBIS) to match invoices sent that way. On: credit memos use the correct base from the lines, for invoices whose sent XML already had the correct base. Use Preview Credit Memo XML to check Base + Amount = Total.';
+                    ApplicationArea = All;
+
+                    trigger OnValidate()
+                    begin
+                        VoxelTaxXML.SetCorrectedBase(CorrectedCreditMemoBase);
+                    end;
+                }
                 field(DocumentNoRef; DocumentNoSeriesRef)
                 {
                     Caption = 'Number Series Document Ref.';
@@ -441,6 +452,7 @@ page 51100 "RV Transaction Register"
         CreditMemoNoSeries: Code[20];
         nextNumber: Code[20];
         DocumentNoSeriesRef: Code[10];
+        CorrectedCreditMemoBase: Boolean;
 
 
     /// <summary>Serie de la página "Credit Memo No. Series" si está informada; si no, la serie de nota de crédito de la terminal.</summary>
@@ -456,13 +468,15 @@ page 51100 "RV Transaction Register"
     local procedure SyncCreditMemos(var RVTransaction: Record "RV Transaction Header")
     var
         Synced: Integer;
-        NotFound: Integer;
+        NoProof: Integer;
         NoReservedNCF: Integer;
         Rebuilt: Integer;
+        AlreadyOk: Integer;
+        Unmarked: Integer;
     begin
-        RVResentManagement.SyncSentCreditMemos(RVTransaction, Synced, NotFound, NoReservedNCF, Rebuilt);
+        RVResentManagement.SyncSentCreditMemos(RVTransaction, Synced, NoProof, NoReservedNCF, Rebuilt, AlreadyOk, Unmarked);
         CurrPage.Update(false);
-        Message('Sincronizadas: %1 (XML reconstruido por no estar archivado: %2). Sin registro de envío en Voxel para el NCF reservado: %3. Sin NCF de nota reservado: %4.', Synced, Rebuilt, NotFound, NoReservedNCF);
+        Message('Marcadas con comprobante de Voxel: %1 (XML reconstruido: %2). Ya validadas: %3.\Desmarcadas por no tener código de seguridad: %4. Sin comprobante (pendientes de enviar): %5. Sin NCF de nota reservado: %6.', Synced, Rebuilt, AlreadyOk, Unmarked, NoProof, NoReservedNCF);
     end;
 
     local procedure LoadTransactions()
@@ -574,6 +588,7 @@ page 51100 "RV Transaction Register"
                 Rec."Voided NCF Credit Memo" := nextNumber;
                 Rec.SetCreditMemoXML(ResultXML);
                 Rec."Voided Date" := Today();
+                RVResentManagement.StampSignature(Rec, CopyStr(efEncabezado.DocumentNo, 1, 20));
                 Rec."XML Document Text" := CopyStr(ResultXML, 1, 2000);
                 Rec.Modify();
                 NCFLogMgt.UpdateLog(Rec."Store No.", Rec."POS Terminal No.", Rec."Transaction No.");
@@ -620,17 +635,15 @@ page 51100 "RV Transaction Register"
     local procedure UnMarkVoided()
     var
         rvTransactionheaderFilter: Record "RV Transaction Header";
+        Unmarked: Integer;
+        KeptWithProof: Integer;
     begin
 
         CurrPage.SetSelectionFilter(rvTransactionheaderFilter);
-        if rvTransactionheaderFilter.findset() then
-            repeat
-                rvTransactionheaderFilter.TestField("Voided NCF Credit Memo", '');
-                rvTransactionheaderFilter."Voided" := false;
-                rvTransactionheaderFilter.Modify();
-            until rvTransactionheaderFilter.Next() = 0;
+        RVResentManagement.UnmarkVoidedRows(rvTransactionheaderFilter, Unmarked, KeptWithProof);
 
         CurrPage.Update();
+        Message('Desmarcadas para reenviar: %1. Conservadas como anuladas por tener código de seguridad de Voxel: %2.', Unmarked, KeptWithProof);
     end;
 
     local procedure UnMarkSend()
@@ -665,6 +678,12 @@ page 51100 "RV Transaction Register"
         SuccessCount: Integer;
         FailedCount: Integer;
         FirstFailure: Text;
+        SkippedVoided: Integer;
+        SkippedNoTransaction: Integer;
+        SkippedE34: Integer;
+        SkippedNoHeader: Integer;
+        RowRebuilt: Boolean;
+        VoidedDetail: Text;
         ReferenceNo: Code[20];
     begin
 
@@ -682,9 +701,24 @@ page 51100 "RV Transaction Register"
                 TransactionHeader.SetRange("POS Terminal No.", rvTransactionHeader."POS Terminal No.");
                 TransactionHeader.SetRange("Transaction No.", rvTransactionHeader."Transaction No.");
 
+                // "Anulada" solo vale con comprobante de Voxel: si no lo tiene se valida contra lo archivado o se desmarca para reenviar.
+                if rvTransactionHeader.Voided and (rvTransactionHeader."Credit Memo Security Code" = '') then
+                    RVResentManagement.SyncRow(rvTransactionHeader, RowRebuilt);
                 nextNumber := rvTransactionHeader."Voided NCF Credit Memo";
-                if not rvTransactionHeader.Voided then
-                    if TransactionHeader.FindFirst() and (CopyStr(TransactionHeader."LSDX NCF", 1, 3) <> 'E34') then begin
+                if rvTransactionHeader.Voided then begin
+                    SkippedVoided += 1;
+                    if VoidedDetail = '' then
+                        VoidedDetail := StrSubstNo('\Primera omitida: Receipt %1, NCF nota "%2", código de seguridad "%3", sello "%4", NCF anulado "%5".',
+                            rvTransactionHeader."Receipt No.", rvTransactionHeader."Voided NCF Credit Memo", rvTransactionHeader."Credit Memo Security Code",
+                            rvTransactionHeader."Credit Memo Stamped At", rvTransactionHeader."Voided NCF");
+                end
+                else
+                    if not TransactionHeader.FindFirst() then
+                        SkippedNoTransaction += 1
+                    else
+                        if CopyStr(TransactionHeader."LSDX NCF", 1, 3) = 'E34' then
+                            SkippedE34 += 1
+                        else begin
                         // Registros importados desde Excel no traen NCF de nota de crédito: se asigna de la serie de la terminal y se
                         // guarda en el registro para reutilizarlo si el envío falla (sin consumir un número por reintento).
                         if nextNumber = '' then begin
@@ -720,14 +754,20 @@ page 51100 "RV Transaction Register"
                                 rvTransactionHeader."Voided NCF Credit Memo" := nextNumber;
                                 rvTransactionHeader.SetCreditMemoXML(ResultXML);
                                 rvTransactionHeader."Voided Date" := Today();
+                                RVResentManagement.StampSignature(rvTransactionHeader, CopyStr(efEncabezado.DocumentNo, 1, 20));
                                 rvTransactionHeader."XML Document Text" := CopyStr(ResultXML, 1, 2000);
                                 rvTransactionHeader.Modify();
                                 NCFLogMgt.UpdateLog(rvTransactionHeader."Store No.", rvTransactionHeader."POS Terminal No.", rvTransactionHeader."Transaction No.");
                             end;
+                        end else begin
+                            SkippedNoHeader += 1;
+                            if FirstFailure = '' then
+                                FirstFailure := '\No se pudo generar el XML de ' + rvTransactionHeader."Receipt No." + ' (GenerateEFHeader devolvió falso).';
                         end;
                     end;
             until rvTransactionHeader.Next() = 0;
-        Message('Notas de crédito enviadas: %1. No confirmadas por Voxel: %2.%3', SuccessCount, FailedCount, FirstFailure);
+        Message('Seleccionadas: %1. Enviadas: %2. No confirmadas por Voxel: %3.\Omitidas: ya anuladas %4, transacción LSC no encontrada %5, ya es E34 %6, XML no generado %7.%8%9',
+            counter, SuccessCount, FailedCount, SkippedVoided, SkippedNoTransaction, SkippedE34, SkippedNoHeader, FirstFailure, VoidedDetail);
     end;
 
 

@@ -45,6 +45,14 @@ table 51101 "RV NCF Log"
         {
             Caption = 'NCF Affected by Credit Memo';
         }
+        field(32; "Credit Memo Security Code"; Text[100])
+        {
+            Caption = 'Credit Memo Security Code';
+        }
+        field(33; "Credit Memo Stamped At"; Text[50])
+        {
+            Caption = 'Credit Memo Stamped Date/Time';
+        }
         field(40; "Replacement Logged At"; DateTime)
         {
             Caption = 'Replacement Logged At';
