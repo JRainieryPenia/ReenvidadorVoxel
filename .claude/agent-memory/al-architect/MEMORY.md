@@ -1,0 +1,1 @@
+- [Voxel TaxSummary design](project_voxel_taxsummary_design.md) — T20260915.0014_REALSON: line-based TaxSummary in FE EFVoxelRequest, root causes, open checkpoints

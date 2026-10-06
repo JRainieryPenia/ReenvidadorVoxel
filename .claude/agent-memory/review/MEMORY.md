@@ -1,0 +1,1 @@
+- [Voxel TaxSummary review facts](project_voxel_taxsummary_review.md) — which EF paths populate detail lines, validate VAT% vs indicator, dead code

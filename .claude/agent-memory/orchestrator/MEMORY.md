@@ -1,0 +1,1 @@
+- [Voxel TaxSummary rules](project_voxel_taxsummary_rules.md) — send a group when it HAS LINES even at 0; never invent empty groups (E47 only Exento); mismatch=Error

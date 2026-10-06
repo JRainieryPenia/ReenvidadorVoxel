@@ -11,6 +11,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     var
         Result: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Result := TaxXML.ForCancellation(MixedInvoice('160.16'));
         AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Base', '188.99');
         AssertUnchangedAmounts(Result);
@@ -31,6 +32,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     var
         Result: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Result := TaxXML.ForCancellation(TaxXML.ForCancellation(MixedInvoice('188.99')));
         AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"]/@Base', '188.99');
         Result := TaxXML.ForResend(TaxXML.ForResend(Result));
@@ -43,6 +45,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     var
         Source: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Source := '<Transaction><ProductList><Product><Taxes><Tax Type="ITBIS" Rate="18" Base="20169.49" Amount="3630.51"/></Taxes></Product></ProductList><TaxSummary><Tax Type="ITBIS" Rate="18" Base="23800.00" Amount="3630.51"/></TaxSummary><TotalSummary SubTotal="20169.49" Tax="3630.51" Total="23800.00"/></Transaction>';
         AssertAttribute(TaxXML.ForResend(Source), '/Transaction/TaxSummary/Tax/@Base', '20169.49');
         AssertAttribute(TaxXML.ForCancellation(TaxXML.ForResend(Source)), '/Transaction/TaxSummary/Tax/@Base', '23800.00');
@@ -54,6 +57,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
         Source: Text;
         Result: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Source := '<Transaction><ProductList><Product><Taxes><Tax Type="ITBIS" Rate="18.00" Base="100.00" Amount="18.00"/></Taxes></Product><Product><Taxes><Tax Type="ITBIS" Rate="16" Base="200.00" Amount="32.00"/></Taxes></Product></ProductList><TaxSummary><Tax Type="ITBIS" Rate="18" Base="118.00" Amount="18.00"/><Tax Type="ITBIS" Rate="16" Base="232.00" Amount="32.00"/></TaxSummary></Transaction>';
         Result := TaxXML.ForResend(Source);
         AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Rate="18"]/@Base', '100.00');
@@ -68,6 +72,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     var
         Source: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Source := '<Transaction><ProductList><Product><Taxes><Tax Type="Exento" Rate="0" Base="75.45" Amount="0"/></Taxes></Product></ProductList><TaxSummary><Tax Type="Exento" Rate="0" Base="75.45" Amount="0"/></TaxSummary></Transaction>';
         AssertAttribute(TaxXML.ForCancellation(Source), '/Transaction/TaxSummary/Tax/@Base', '75.45');
         AssertAttribute(TaxXML.ForResend(Source), '/Transaction/TaxSummary/Tax/@Amount', '0');
@@ -82,11 +87,59 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     end;
 
     [Test]
+    procedure EmptyRate16GroupIsPreserved()
+    var
+        Result: Text;
+    begin
+        TaxXML.SetCorrectedBase(false);
+        // Formato real de BuildTaxNodeSumary: Rate sin ceros, Base/Amount con 2 decimales; grupos 16 y 0 siempre presentes.
+        Result := TaxXML.ForResend(EmptyGroupsInvoice('118.00'));
+        AssertEmptyGroups(Result, '100.00');
+        Result := TaxXML.ForCancellation(EmptyGroupsInvoice('100.00'));
+        AssertEmptyGroups(Result, '118.00');
+    end;
+
+    [Test]
+    procedure EmptyGroupsRepeatedTransformsAreIdempotent()
+    var
+        Result: Text;
+    begin
+        TaxXML.SetCorrectedBase(false);
+        Result := TaxXML.ForResend(TaxXML.ForResend(EmptyGroupsInvoice('118.00')));
+        AssertEmptyGroups(Result, '100.00');
+        Result := TaxXML.ForCancellation(TaxXML.ForCancellation(Result));
+        AssertEmptyGroups(Result, '118.00');
+        Result := TaxXML.ForResend(Result);
+        AssertEmptyGroups(Result, '100.00');
+    end;
+
+    [Test]
+    procedure EmptyGroupWithAmountCannotBeGuessed()
+    begin
+        asserterror TaxXML.ForResend('<Transaction><ProductList/><TaxSummary><Tax Type="ITBIS" Rate="16" Base="0.00" Amount="5.00"/></TaxSummary></Transaction>');
+        if StrPos(GetLastErrorText(), 'No hay líneas ITBIS') = 0 then
+            Error('Se esperaba rechazar un grupo sin líneas con importe.');
+    end;
+
+    [Test]
+    procedure Itbis3ZeroRateGroupIsPreserved()
+    var
+        Result: Text;
+    begin
+        TaxXML.SetCorrectedBase(false);
+        Result := TaxXML.ForResend(Itbis3ZeroRateInvoice());
+        AssertItbis3ZeroRateGroups(Result);
+        Result := TaxXML.ForCancellation(Itbis3ZeroRateInvoice());
+        AssertItbis3ZeroRateGroups(Result);
+    end;
+
+    [Test]
     procedure CreditMemoWithoutClientHasReference()
     var
         Management: Codeunit "RV Resent Management";
         Result: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Result := Management.ConvertToCreditMemo(MixedInvoice('188.99'), 'REF-NC', 'E340000000001', 'E320000153206', '1');
         Result := TaxXML.ForCancellation(Result);
         AssertAttribute(Result, '/Transaction/GeneralData/@Type', 'FacturaAbono');
@@ -100,6 +153,7 @@ codeunit 51148 "RV Voxel Tax XML Tests"
         Management: Codeunit "RV Resent Management";
         Result: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         // Voxel offline production (E320000140425): ITBIS line 39.07 + tax 7.03 -> summary base 46.10.
         Result := Management.ConvertToCreditMemo(ProductionSample(), 'REF-NC', 'E340000000001', 'E320000140425', '1');
         Result := TaxXML.ForCancellation(Result);
@@ -117,11 +171,55 @@ codeunit 51148 "RV Voxel Tax XML Tests"
     var
         Source: Text;
     begin
+        TaxXML.SetCorrectedBase(false);
         Source := '<Transaction><ProductList><Product><Taxes><Tax Type="Exento" Rate="0" Base="10.00" Amount="0"/></Taxes></Product></ProductList>' +
             '<TaxSummary><Tax Type="Exento" Rate="0" Base="10.00" Amount="0"/></TaxSummary>' +
             '<References><Reference InvoiceNCF="E320000000001"><PublicAdministration><DOM CodigoModificacion="3" IndicadorNotaCredito="0"/></PublicAdministration></Reference></References></Transaction>';
         AssertAttribute(TaxXML.ForCancellation(Source), '/Transaction/References/Reference/PublicAdministration/DOM/@CodigoModificacion', '1');
         AssertAttribute(TaxXML.ForResend(Source), '/Transaction/References/Reference/PublicAdministration/DOM/@CodigoModificacion', '3');
+    end;
+
+    local procedure EmptyGroupsInvoice(Rate18Base: Text): Text
+    begin
+        exit('<Transaction><ProductList><Product><Taxes><Tax Type="ITBIS" Rate="18" Base="100.00" Amount="18.00"/></Taxes></Product>' +
+            '<Product><Taxes><Tax Type="Exento" Rate="0" Base="50.00" Amount="0"/></Taxes></Product></ProductList>' +
+            '<TaxSummary><Tax Type="ITBIS" Rate="18" Base="' + Rate18Base + '" Amount="18.00"/>' +
+            '<Tax Type="ITBIS" Rate="16" Base="0.00" Amount="0.00"/>' +
+            '<Tax Type="ITBIS" Rate="0" Base="0.00" Amount="0.00"/>' +
+            '<Tax Type="Exento" Rate="0" Base="50.00" Amount="0"/></TaxSummary>' +
+            '<TotalSummary SubTotal="150.00" Tax="18.00" Total="168.00"/></Transaction>');
+    end;
+
+    local procedure Itbis3ZeroRateInvoice(): Text
+    begin
+        // Líneas ITBIS3 (0%) salen como Exento; el resumen trae ITBIS Rate 0 con base > 0 y Amount 0.
+        exit('<Transaction><ProductList><Product><Taxes><Tax Type="Exento" Rate="0" Base="75.00" Amount="0"/></Taxes></Product></ProductList>' +
+            '<TaxSummary><Tax Type="ITBIS" Rate="18" Base="0.00" Amount="0.00"/>' +
+            '<Tax Type="ITBIS" Rate="16" Base="0.00" Amount="0.00"/>' +
+            '<Tax Type="ITBIS" Rate="0" Base="75.00" Amount="0.00"/>' +
+            '<Tax Type="Exento" Rate="0" Base="75.00" Amount="0"/></TaxSummary>' +
+            '<TotalSummary SubTotal="75.00" Tax="0.00" Total="75.00"/></Transaction>');
+    end;
+
+    local procedure AssertItbis3ZeroRateGroups(Result: Text)
+    begin
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="0"]/@Base', '75.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="18"]/@Base', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="16"]/@Base', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="Exento"]/@Base', '75.00');
+    end;
+
+    local procedure AssertEmptyGroups(Result: Text; Rate18Base: Text)
+    begin
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="18"]/@Base', Rate18Base);
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="18"]/@Amount', '18.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="16"]/@Base', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="16"]/@Amount', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="0"]/@Base', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="ITBIS"][@Rate="0"]/@Amount', '0.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="Exento"]/@Base', '50.00');
+        AssertAttribute(Result, '/Transaction/TaxSummary/Tax[@Type="Exento"]/@Amount', '0');
+        AssertAttribute(Result, '/Transaction/TotalSummary/@Total', '168.00');
     end;
 
     local procedure ProductionSample(): Text

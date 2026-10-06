@@ -77,14 +77,24 @@ codeunit 51102 "RV Voxel Tax XML"
                             NetBase += DecimalAttribute(ProductTax, 'Base');
                             MatchingLines += 1;
                         end;
-                if MatchingLines = 0 then
-                    Error('No hay líneas ITBIS para reconstruir la base de la tasa %1.', SummaryRate);
-                // Rebuild from line bases, so repeated calls never add/subtract tax twice.
-                // Exempt lines and other rates never contribute to this tax group.
-                if HistoricalBase then
-                    NetBase += DecimalAttribute(SummaryTax, 'Amount');
-                SummaryElement := SummaryTax.AsXmlElement();
-                SummaryElement.SetAttribute('Base', Format(Round(NetBase, 0.01), 0, '<Precision,2:2><Standard Format,9>'));
+                // Tres situaciones por grupo ITBIS del resumen:
+                // - Con líneas ITBIS de esa tasa: se reconstruye la base desde las líneas.
+                // - Sin líneas y con Amount 0: grupo vacío (el generador siempre emite 18, 16, 0 y Exento) o grupo
+                //   "ITBIS 3 (0%)" cuyas líneas salen como Exento; con Amount 0 la base histórica ya es la actual: se conserva.
+                // - Sin líneas y con Amount <> 0: no se puede adivinar la base; se rechaza.
+                case true of
+                    MatchingLines > 0:
+                        begin
+                            // Rebuild from line bases, so repeated calls never add/subtract tax twice.
+                            // Exempt lines and other rates never contribute to this tax group.
+                            if HistoricalBase then
+                                NetBase += DecimalAttribute(SummaryTax, 'Amount');
+                            SummaryElement := SummaryTax.AsXmlElement();
+                            SummaryElement.SetAttribute('Base', Format(Round(NetBase, 0.01), 0, '<Precision,2:2><Standard Format,9>'));
+                        end;
+                    DecimalAttribute(SummaryTax, 'Amount') <> 0:
+                        Error('No hay líneas ITBIS para reconstruir la base de la tasa %1.', SummaryRate);
+                end;
             end;
         Document.WriteTo(Result);
     end;
