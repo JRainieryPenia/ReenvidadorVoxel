@@ -249,9 +249,14 @@
         end;
         Terminal.Get(TransactionHeader."POS Terminal No.");
         case CopyStr(TransactionHeader."LSDX NCF", 1, 3) of
-            'E31': SeriesCode := Terminal."LSDXNo. Serie NCF Cred. Fiscal";
-            'E32': SeriesCode := Terminal."LSDXNo. Serie NCF Cons. Final";
-            else Error('No hay una serie de reemplazo configurada para el tipo de NCF %1.', TransactionHeader."LSDX NCF");
+            'E31':
+                SeriesCode := Terminal."LSDXNo. Serie NCF Cred. Fiscal";
+            'E32':
+                SeriesCode := Terminal."LSDXNo. Serie NCF Cons. Final";
+            'E44':
+                SeriesCode := Terminal."LSDXNo. Serie NCF Reg. Esp.";
+            else
+                Error('No hay una serie de reemplazo configurada para el tipo de NCF %1.', TransactionHeader."LSDX NCF");
         end;
         ReplaceNCF(TransactionHeader, SeriesCode);
     end;
