@@ -411,6 +411,19 @@ page 51100 "RV Transaction Register"
                     CurrPage.Update();
                 end;
             }
+            action("Assign Void NCF Selected Transactions")
+            {
+                Caption = 'Assign Void NCF Selected Transactions';
+                ToolTip = 'Assigns and saves the credit memo NCF for the selected transactions without sending anything to Voxel.';
+                Image = NumberSetup;
+                ApplicationArea = All;
+
+                trigger OnAction()
+                begin
+                    AssignVoidNCFSelectedTransactions();
+                    CurrPage.Update();
+                end;
+            }
             action("Resend Selected Transactions NEW NCF")
             {
                 Caption = 'Resend Selected Transactions New';
@@ -420,6 +433,19 @@ page 51100 "RV Transaction Register"
                 trigger OnAction()
                 begin
                     ResendTransactionBatch();
+                    CurrPage.Update();
+                end;
+            }
+            action("Assign Resend NCF Selected Transactions")
+            {
+                Caption = 'Assign Resend NCF Selected Transactions';
+                ToolTip = 'Assigns and saves the replacement NCF for the selected transactions without sending anything to Voxel.';
+                Image = NumberSetup;
+                ApplicationArea = All;
+
+                trigger OnAction()
+                begin
+                    AssignResendNCFSelectedTransactions();
                     CurrPage.Update();
                 end;
             }
@@ -768,6 +794,43 @@ page 51100 "RV Transaction Register"
             until rvTransactionHeader.Next() = 0;
         Message('Seleccionadas: %1. Enviadas: %2. No confirmadas por Voxel: %3.\Omitidas: ya anuladas %4, transacción LSC no encontrada %5, ya es E34 %6, XML no generado %7.%8%9',
             counter, SuccessCount, FailedCount, SkippedVoided, SkippedNoTransaction, SkippedE34, SkippedNoHeader, FirstFailure, VoidedDetail);
+    end;
+
+    local procedure AssignVoidNCFSelectedTransactions()
+    var
+        SelectedTransactions: Record "RV Transaction Header";
+        ProcessedCount: Integer;
+        AssignedCount: Integer;
+    begin
+        CurrPage.SetSelectionFilter(SelectedTransactions);
+        if SelectedTransactions.FindSet(true) then
+            repeat
+                ProcessedCount += 1;
+                if RVResentManagement.AssignVoidNCF(SelectedTransactions, CreditMemoNoSeries) then
+                    AssignedCount += 1;
+            until SelectedTransactions.Next() = 0;
+
+        Message('%1 de %2 transacciones tienen ahora un NCF de nota de crédito reservado. No se envió nada a Voxel.', AssignedCount, ProcessedCount);
+    end;
+
+    local procedure AssignResendNCFSelectedTransactions()
+    var
+        SelectedRVTransactions: Record "RV Transaction Header";
+        TransactionHeader: Record "LSC Transaction Header";
+        ProcessedCount: Integer;
+        AssignedCount: Integer;
+    begin
+        CurrPage.SetSelectionFilter(SelectedRVTransactions);
+        if SelectedRVTransactions.FindSet() then
+            repeat
+                ProcessedCount += 1;
+                if TransactionHeader.Get(SelectedRVTransactions."Store No.", SelectedRVTransactions."POS Terminal No.", SelectedRVTransactions."Transaction No.") then begin
+                    RVResentManagement.AssignResendNCF(TransactionHeader);
+                    AssignedCount += 1;
+                end;
+            until SelectedRVTransactions.Next() = 0;
+
+        Message('%1 de %2 transacciones tienen ahora un NCF de reemplazo asignado. No se envió nada a Voxel.', AssignedCount, ProcessedCount);
     end;
 
 

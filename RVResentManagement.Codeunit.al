@@ -261,6 +261,49 @@
         ReplaceNCF(TransactionHeader, SeriesCode);
     end;
 
+    /// <summary>
+    /// Reserva el NCF de la nota de crédito para una anulación, sin generar ni enviar
+    /// ningún documento a Voxel. Si ya existe una reserva, la reutiliza.
+    /// </summary>
+    procedure AssignVoidNCF(var RVTransaction: Record "RV Transaction Header"; SeriesOverride: Code[20]): Boolean
+    var
+        TransactionHeader: Record "LSC Transaction Header";
+        Terminal: Record "LSC POS Terminal";
+        NoSeries: Codeunit "No. Series";
+        CreditMemoNCF: Code[20];
+    begin
+        if RVTransaction."Voided NCF Credit Memo" <> '' then
+            exit(true);
+
+        if not TransactionHeader.Get(RVTransaction."Store No.", RVTransaction."POS Terminal No.", RVTransaction."Transaction No.") then
+            exit(false);
+        if CopyStr(TransactionHeader."LSDX NCF", 1, 3) = 'E34' then
+            exit(false);
+
+        Terminal.Get(RVTransaction."POS Terminal No.");
+        if SeriesOverride = '' then begin
+            if Terminal."LSDXNCF Nota de Credito" = '' then
+                Error('Configure NCF for Credit Memo on POS Terminal %1.', Terminal."No.");
+            SeriesOverride := Terminal."LSDXNCF Nota de Credito";
+        end;
+        CreditMemoNCF := NoSeries.GetNextNo(SeriesOverride);
+
+        RVTransaction."Voided NCF Credit Memo" := CreditMemoNCF;
+        RVTransaction."Voided NCF" := TransactionHeader."LSDX NCF";
+        RVTransaction.Voided := false;
+        RVTransaction.ReSent := false;
+        RVTransaction.Modify(true);
+        exit(true);
+    end;
+
+    /// <summary>
+    /// Asigna el NCF de reemplazo para reenvío, sin enviar el documento a Voxel.
+    /// </summary>
+    procedure AssignResendNCF(var TransactionHeader: Record "LSC Transaction Header")
+    begin
+        PrepareReplacement(TransactionHeader);
+    end;
+
     procedure MarkResent(TransactionHeader: Record "LSC Transaction Header"; var RVTransaction: Record "RV Transaction Header")
     begin
         EnsureRVTransaction(TransactionHeader, RVTransaction);

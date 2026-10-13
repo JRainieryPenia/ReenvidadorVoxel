@@ -266,6 +266,28 @@ pageextension 51100 "RV Transaction Register Ext" extends "LSC Transaction Regis
                     CurrPage.Update();
                 end;
             }
+            action(AssignResendNCFFromTransactionHeader)
+            {
+                ApplicationArea = All;
+                Caption = 'Assign Resend NCF (No Send)';
+                ToolTip = 'Assigns and saves the replacement NCF for the selected transactions without sending anything to Voxel.';
+                Image = NumberSetup;
+
+                trigger OnAction()
+                var
+                    SelectedTransactions: Record "LSC Transaction Header";
+                    ProcessedCount: Integer;
+                begin
+                    CurrPage.SetSelectionFilter(SelectedTransactions);
+                    if SelectedTransactions.FindSet() then
+                        repeat
+                            RVResentManagement.AssignResendNCF(SelectedTransactions);
+                            ProcessedCount += 1;
+                        until SelectedTransactions.Next() = 0;
+                    Message('%1 transacciones tienen ahora un NCF de reemplazo asignado. No se envió nada a Voxel.', ProcessedCount);
+                    CurrPage.Update();
+                end;
+            }
         }
     }
 
